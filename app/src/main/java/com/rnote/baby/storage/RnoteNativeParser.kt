@@ -1,0 +1,658 @@
+package com.rnote.baby.storage
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonToken
+import com.rnote.baby.model.EllipseShape
+import com.rnote.baby.model.FreehandShape
+import com.rnote.baby.model.LineShape
+import com.rnote.baby.model.NativeBackgroundConfig
+import com.rnote.baby.model.NativeBitmapElement
+import com.rnote.baby.model.NativeBrushStroke
+import com.rnote.baby.model.NativeCanvasElement
+import com.rnote.baby.model.NativePatternType
+import com.rnote.baby.model.NativeShapeElement
+import com.rnote.baby.model.NativeStrokePoint
+import com.rnote.baby.model.NativeTextElement
+import com.rnote.baby.model.RectShape
+import com.rnote.baby.model.RnoteNativeColor
+import com.rnote.baby.model.RnoteNativeDocument
+import java.io.InputStream
+import java.io.InputStreamReader
+import java.util.zip.GZIPInputStream
+
+/**
+ * Streaming parser for .rnote files (GZIP-compressed JSON).
+ *
+ * Never loads the full JSON string into memory — uses Gson's [JsonReader]
+ * token-by-token streaming API over a [GZIPInputStream].
+ *
+ * Ported and adapted from Intranox/rnoteviewer-android (RnoteParser.kt).
+ */
+object RnoteNativeParser {
+
+    // ── Entry points ──────────────────────────────────────────────────────────
+
+    fun parse(context: Context, uri: Uri): RnoteNativeDocument =
+        context.contentResolver.openInputStream(uri)!!.use { parse(it) }
+
+    fun parse(inputStream: InputStream): RnoteNativeDocument {
+        val reader = JsonReader(InputStreamReader(GZIPInputStream(inputStream), Charsets.UTF_8))
+        reader.isLenient = true
+        return parseRoot(reader)
+    }
+
+    // ── Internal holder types ─────────────────────────────────────────────────
+
+    private data class FormatConfig(val width: Float = 793.7f, val height: Float = 1122.5f)
+    private data class BgCfg(
+        val color: RnoteNativeColor = RnoteNativeColor.WHITE,
+        val pattern: NativePatternType = NativePatternType.DOTS,
+        val patternW: Float = 21f, val patternH: Float = 21f,
+        val patternColor: RnoteNativeColor = RnoteNativeColor(0.8f, 0.9f, 1f, 1f)
+    )
+    private var parsedLayout: String = ""
+
+    // ── Root ──────────────────────────────────────────────────────────────────
+
+    private fun parseRoot(reader: JsonReader): RnoteNativeDocument {
+        var format = FormatConfig()
+        var bg = BgCfg()
+        var totalHeight = 0f
+        val rawElements = mutableListOf<NativeCanvasElement?>()
+        val chronoOrder = mutableListOf<Int>()
+
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "data" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "engine_snapshot" -> {
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "document"          -> {
+                                            val r = parseDocument(reader)
+                                            format = r.first; bg = r.second; totalHeight = r.third
+                                        }
+                                        "stroke_components" -> parseStrokeComponents(reader, rawElements)
+                                        "chrono_components" -> parseChronoComponents(reader, chronoOrder)
+                                        else                -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                            }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+
+        val elements = buildOrderedElements(rawElements, chronoOrder)
+        return RnoteNativeDocument(
+            pageWidth   = format.width,
+            pageHeight  = format.height,
+            totalHeight = if (totalHeight > 0f) totalHeight else format.height,
+            background  = NativeBackgroundConfig(bg.color, bg.pattern, bg.patternW, bg.patternH, bg.patternColor),
+            elements    = elements,
+            layout      = parsedLayout
+        )
+    }
+
+    // ── Document block ────────────────────────────────────────────────────────
+
+    private fun parseDocument(reader: JsonReader): Triple<FormatConfig, BgCfg, Float> {
+        var format = FormatConfig(); var bg = BgCfg(); var h = 0f
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "config" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "format"     -> format = parseFormatConfig(reader)
+                            "background" -> bg     = parseBgConfig(reader)
+                            "layout"     -> parsedLayout = reader.nextString()
+                            else         -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                "height" -> h = reader.nextDouble().toFloat()
+                else     -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return Triple(format, bg, h)
+    }
+
+    private fun parseFormatConfig(reader: JsonReader): FormatConfig {
+        var w = 793.7f; var h = 1122.5f
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "width"  -> w = reader.nextDouble().toFloat()
+                "height" -> h = reader.nextDouble().toFloat()
+                else     -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return FormatConfig(w, h)
+    }
+
+    private fun parseBgConfig(reader: JsonReader): BgCfg {
+        var color = RnoteNativeColor.WHITE
+        var pattern = NativePatternType.DOTS
+        var pw = 21f; var ph = 21f
+        var pc = RnoteNativeColor(0.8f, 0.9f, 1f, 1f)
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "color"         -> color   = parseColor(reader)
+                "pattern"       -> pattern = parsePatternType(reader.nextString())
+                "pattern_size"  -> {
+                    reader.beginArray()
+                    pw = reader.nextDouble().toFloat()
+                    ph = reader.nextDouble().toFloat()
+                    reader.endArray()
+                }
+                "pattern_color" -> pc      = parseColor(reader)
+                else            -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return BgCfg(color, pattern, pw, ph, pc)
+    }
+
+    private fun parsePatternType(s: String) = when (s.lowercase().trim()) {
+        "grid"           -> NativePatternType.GRID
+        "ruled", "lines" -> NativePatternType.RULED
+        "dots"           -> NativePatternType.DOTS
+        "isometric_grid" -> NativePatternType.ISO_GRID
+        "isometric_dots" -> NativePatternType.ISO_DOTS
+        else             -> NativePatternType.BLANK
+    }
+
+    // ── stroke_components ─────────────────────────────────────────────────────
+
+    private fun parseStrokeComponents(reader: JsonReader, out: MutableList<NativeCanvasElement?>) {
+        reader.beginArray()
+        while (reader.hasNext()) out.add(parseOneComponent(reader))
+        reader.endArray()
+    }
+
+    private fun parseOneComponent(reader: JsonReader): NativeCanvasElement? {
+        var element: NativeCanvasElement? = null
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "value" -> element = if (reader.peek() == JsonToken.NULL) {
+                    reader.nextNull(); null
+                } else parseElementValue(reader)
+                else    -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return element
+    }
+
+    private fun parseElementValue(reader: JsonReader): NativeCanvasElement? {
+        var element: NativeCanvasElement? = null
+        reader.beginObject()
+        while (reader.hasNext()) {
+            element = when (reader.nextName()) {
+                "brushstroke" -> parseBrushStroke(reader)
+                "textstroke"  -> parseTextStroke(reader)
+                "bitmapimage" -> parseBitmapImage(reader)
+                "shapestroke" -> parseShapeStroke(reader)
+                else          -> { reader.skipValue(); element }
+            }
+        }
+        reader.endObject()
+        return element
+    }
+
+    // ── BrushStroke ───────────────────────────────────────────────────────────
+
+    private fun parseBrushStroke(reader: JsonReader): NativeBrushStroke? {
+        val pts = mutableListOf<NativeStrokePoint>()
+        var color = RnoteNativeColor.BLACK
+        var width = 2f
+        var isHighlighter = false
+
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "path"   -> pts.addAll(parsePath(reader))
+                "style"  -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName().lowercase()) {
+                            "smooth", "textured" -> {
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "stroke_color" -> color = parseColor(reader)
+                                        "stroke_width" -> width = reader.nextDouble().toFloat()
+                                        else           -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                            }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                "brush"  -> {
+                    // Detect highlighter by brush type name
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "BrushStyle" -> {
+                                val style = reader.nextString()
+                                isHighlighter = style.contains("Highlighter", ignoreCase = true)
+                            }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+
+        if (pts.isEmpty()) return null
+        val minX = pts.minOf { it.x }; val minY = pts.minOf { it.y }
+        val maxX = pts.maxOf { it.x }; val maxY = pts.maxOf { it.y }
+        return NativeBrushStroke(pts, width, color, isHighlighter, minX, minY, maxX, maxY)
+    }
+
+    private fun parsePath(reader: JsonReader): List<NativeStrokePoint> {
+        val pts = mutableListOf<NativeStrokePoint>()
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                // v0.14+ format: {"start": {pos,pressure}, "segments": [{"lineto":{"end":{pos,pressure}}}]}
+                "start" -> {
+                    val pt = parsePathPoint(reader)
+                    pts.add(pt)
+                }
+                "segments" -> {
+                    reader.beginArray()
+                    while (reader.hasNext()) {
+                        reader.beginObject()
+                        while (reader.hasNext()) {
+                            when (reader.nextName()) {
+                                "lineto" -> {
+                                    reader.beginObject()
+                                    while (reader.hasNext()) {
+                                        when (reader.nextName()) {
+                                            "end" -> pts.add(parsePathPoint(reader))
+                                            else  -> reader.skipValue()
+                                        }
+                                    }
+                                    reader.endObject()
+                                }
+                                "quadbez" -> {
+                                    reader.beginObject()
+                                    while (reader.hasNext()) {
+                                        when (reader.nextName()) {
+                                            "end" -> pts.add(parsePathPoint(reader))
+                                            else  -> reader.skipValue()
+                                        }
+                                    }
+                                    reader.endObject()
+                                }
+                                "cubbez" -> {
+                                    reader.beginObject()
+                                    while (reader.hasNext()) {
+                                        when (reader.nextName()) {
+                                            "end" -> pts.add(parsePathPoint(reader))
+                                            else  -> reader.skipValue()
+                                        }
+                                    }
+                                    reader.endObject()
+                                }
+                                else -> reader.skipValue()
+                            }
+                        }
+                        reader.endObject()
+                    }
+                    reader.endArray()
+                }
+                // Old format: {"elements": [{pos, pressure}]}
+                "elements" -> {
+                    reader.beginArray()
+                    while (reader.hasNext()) {
+                        pts.add(parsePathPoint(reader))
+                    }
+                    reader.endArray()
+                }
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return pts
+    }
+
+    /** Parses a single path point object: {"pos": [x, y], "pressure": p} */
+    private fun parsePathPoint(reader: JsonReader): NativeStrokePoint {
+        var x = 0f; var y = 0f; var pressure = 1f
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "pos"      -> { reader.beginArray(); x = reader.nextDouble().toFloat(); y = reader.nextDouble().toFloat(); reader.endArray() }
+                "pressure" -> pressure = reader.nextDouble().toFloat()
+                else       -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return NativeStrokePoint(x, y, pressure)
+    }
+
+    // ── TextStroke ────────────────────────────────────────────────────────────
+
+    private fun parseTextStroke(reader: JsonReader): NativeTextElement? {
+        var text = ""; var family = "sans-serif"; var size = 14f
+        var color = RnoteNativeColor.BLACK
+        val transform = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
+        var minX = 0f; var minY = 0f; var maxX = 0f; var maxY = 0f
+
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "text"      -> text   = reader.nextString()
+                "transform" -> parseTransformInto(reader, transform)
+                "text_style" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "font_family" -> family = reader.nextString()
+                            "font_size"   -> size   = reader.nextDouble().toFloat()
+                            "color"       -> color  = parseColor(reader)
+                            else          -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                "bounds" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "mins" -> { reader.beginArray(); minX = reader.nextDouble().toFloat(); minY = reader.nextDouble().toFloat(); reader.endArray() }
+                            "maxs" -> { reader.beginArray(); maxX = reader.nextDouble().toFloat(); maxY = reader.nextDouble().toFloat(); reader.endArray() }
+                            else   -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        if (text.isBlank()) return null
+        // Fallback bounds from transform if no explicit bounds
+        if (maxX == 0f) { minX = transform[4]; minY = transform[5]; maxX = minX + size * 10; maxY = minY + size }
+        return NativeTextElement(text, family, size, color, transform, minX, minY, maxX, maxY)
+    }
+
+    // ── BitmapImage ───────────────────────────────────────────────────────────
+
+    private fun parseBitmapImage(reader: JsonReader): NativeBitmapElement? {
+        var imageBase64 = ""
+        val transform   = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
+        var minX = 0f; var minY = 0f; var maxX = 100f; var maxY = 100f
+
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "image_data" -> imageBase64 = reader.nextString()
+                "transform"  -> parseTransformInto(reader, transform)
+                "bounds" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "mins" -> { reader.beginArray(); minX = reader.nextDouble().toFloat(); minY = reader.nextDouble().toFloat(); reader.endArray() }
+                            "maxs" -> { reader.beginArray(); maxX = reader.nextDouble().toFloat(); maxY = reader.nextDouble().toFloat(); reader.endArray() }
+                            else   -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+
+        if (imageBase64.isBlank()) return null
+        return try {
+            val bytes = Base64.decode(imageBase64, Base64.DEFAULT)
+            val bmp   = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: return null
+            val pixels = IntArray(bmp.width * bmp.height)
+            bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+            bmp.recycle()
+            NativeBitmapElement(pixels, bmp.width, bmp.height, transform, minX, minY, maxX, maxY)
+        } catch (e: Exception) { null }
+    }
+
+    // ── ShapeStroke ───────────────────────────────────────────────────────────
+
+    private fun parseShapeStroke(reader: JsonReader): NativeShapeElement? {
+        var shape: com.rnote.baby.model.NativeShapeKind? = null
+        var color = RnoteNativeColor.BLACK
+        var width = 2f
+
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "shape" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (val shapeName = reader.nextName()) {
+                            "Line" -> {
+                                var x1 = 0f; var y1 = 0f; var x2 = 0f; var y2 = 0f
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "start" -> { reader.beginArray(); x1 = reader.nextDouble().toFloat(); y1 = reader.nextDouble().toFloat(); reader.endArray() }
+                                        "end"   -> { reader.beginArray(); x2 = reader.nextDouble().toFloat(); y2 = reader.nextDouble().toFloat(); reader.endArray() }
+                                        else    -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                                shape = LineShape(x1, y1, x2, y2)
+                            }
+                            "Rectangle" -> {
+                                var x = 0f; var y = 0f; var w = 0f; var h = 0f
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "top_left" -> { reader.beginArray(); x = reader.nextDouble().toFloat(); y = reader.nextDouble().toFloat(); reader.endArray() }
+                                        "size"     -> { reader.beginArray(); w = reader.nextDouble().toFloat(); h = reader.nextDouble().toFloat(); reader.endArray() }
+                                        else       -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                                shape = RectShape(x, y, w, h)
+                            }
+                            "Ellipse" -> {
+                                var cx = 0f; var cy = 0f; var rx = 0f; var ry = 0f
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "center" -> { reader.beginArray(); cx = reader.nextDouble().toFloat(); cy = reader.nextDouble().toFloat(); reader.endArray() }
+                                        "radii"  -> { reader.beginArray(); rx = reader.nextDouble().toFloat(); ry = reader.nextDouble().toFloat(); reader.endArray() }
+                                        else     -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                                shape = EllipseShape(cx, cy, rx, ry)
+                            }
+                            "FreehandPen", "Freehand" -> {
+                                val pts = parsePath(reader)
+                                shape = FreehandShape(pts)
+                            }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                "style" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "Smooth", "Rough" -> {
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        "stroke_color" -> color = parseColor(reader)
+                                        "stroke_width" -> width = reader.nextDouble().toFloat()
+                                        else           -> reader.skipValue()
+                                    }
+                                }
+                                reader.endObject()
+                            }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+
+        val s = shape ?: return null
+        val (mnX, mnY, mxX, mxY) = boundsForShape(s)
+        return NativeShapeElement(s, color, width, mnX, mnY, mxX, mxY)
+    }
+
+    private fun boundsForShape(s: com.rnote.baby.model.NativeShapeKind): FloatArray = when (s) {
+        is LineShape     -> floatArrayOf(minOf(s.x1,s.x2), minOf(s.y1,s.y2), maxOf(s.x1,s.x2), maxOf(s.y1,s.y2))
+        is RectShape     -> floatArrayOf(s.x, s.y, s.x + s.w, s.y + s.h)
+        is EllipseShape  -> floatArrayOf(s.cx - s.rx, s.cy - s.ry, s.cx + s.rx, s.cy + s.ry)
+        is FreehandShape -> {
+            val pts = s.points
+            if (pts.isEmpty()) floatArrayOf(0f,0f,0f,0f)
+            else floatArrayOf(pts.minOf{it.x}, pts.minOf{it.y}, pts.maxOf{it.x}, pts.maxOf{it.y})
+        }
+    }
+
+    // ── chrono_components ─────────────────────────────────────────────────────
+
+    private fun parseChronoComponents(reader: JsonReader, out: MutableList<Int>) {
+        reader.beginArray()
+        while (reader.hasNext()) {
+            // Each item: {"value": {"t": index, ...} | null, "version": N}
+            reader.beginObject()
+            while (reader.hasNext()) {
+                when (reader.nextName()) {
+                    "value" -> {
+                        if (reader.peek() == JsonToken.NULL) {
+                            reader.nextNull()
+                        } else {
+                            reader.beginObject()
+                            while (reader.hasNext()) {
+                                when (reader.nextName()) {
+                                    // v0.14: {"t": index}
+                                    "t" -> out.add(reader.nextInt())
+                                    // Old: {"stroke_key": {"index": N}}
+                                    "stroke_key" -> out.add(parseStrokeKey(reader))
+                                    else -> reader.skipValue()
+                                }
+                            }
+                            reader.endObject()
+                        }
+                    }
+                    // Old format without value wrapper
+                    "stroke_key" -> out.add(parseStrokeKey(reader))
+                    else -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+        }
+        reader.endArray()
+    }
+
+    private fun parseStrokeKey(reader: JsonReader): Int {
+        var idx = -1
+        if (reader.peek() == JsonToken.BEGIN_OBJECT) {
+            reader.beginObject()
+            while (reader.hasNext()) {
+                when (reader.nextName()) {
+                    "index" -> idx = reader.nextInt()
+                    else    -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+        } else {
+            idx = reader.nextInt()
+        }
+        return idx
+    }
+
+    private fun buildOrderedElements(
+        raw: List<NativeCanvasElement?>,
+        order: List<Int>
+    ): List<NativeCanvasElement> {
+        if (order.isEmpty()) return raw.filterNotNull()
+        return order.mapNotNull { idx -> raw.getOrNull(idx) }
+    }
+
+    // ── Shared helpers ────────────────────────────────────────────────────────
+
+    private fun parseColor(reader: JsonReader): RnoteNativeColor {
+        var r = 0f; var g = 0f; var b = 0f; var a = 1f
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "r" -> r = reader.nextDouble().toFloat()
+                "g" -> g = reader.nextDouble().toFloat()
+                "b" -> b = reader.nextDouble().toFloat()
+                "a" -> a = reader.nextDouble().toFloat()
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return RnoteNativeColor(r, g, b, a)
+    }
+
+    /**
+     * Reads a 2D affine transform (column-major 2×3) into [out]:
+     * [a, b, c, d, tx, ty]
+     */
+    private fun parseTransformInto(reader: JsonReader, out: FloatArray) {
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "matrix" -> {
+                    reader.beginArray()
+                    for (i in 0..5) { if (reader.hasNext()) out[i] = reader.nextDouble().toFloat() }
+                    reader.endArray()
+                }
+                // flat inline [a,b,c,d,e,f]
+                "a" -> out[0] = reader.nextDouble().toFloat()
+                "b" -> out[1] = reader.nextDouble().toFloat()
+                "c" -> out[2] = reader.nextDouble().toFloat()
+                "d" -> out[3] = reader.nextDouble().toFloat()
+                "e" -> out[4] = reader.nextDouble().toFloat()
+                "f" -> out[5] = reader.nextDouble().toFloat()
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+    }
+}
