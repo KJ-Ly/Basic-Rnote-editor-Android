@@ -10,7 +10,6 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.rnote.baby.model.PaperPattern
 import com.rnote.baby.model.PaperStyle
-import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.sqrt
 

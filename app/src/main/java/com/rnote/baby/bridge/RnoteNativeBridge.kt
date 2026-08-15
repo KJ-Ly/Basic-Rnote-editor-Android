@@ -1,6 +1,5 @@
 package com.rnote.baby.bridge
 
-import com.rnote.baby.model.NoteDocument
 
 object RnoteNativeBridge {
 

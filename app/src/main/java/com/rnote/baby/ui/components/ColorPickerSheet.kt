@@ -31,10 +31,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rnote.baby.model.ToolConfig
+import com.rnote.baby.model.ToolType
 
 val FullPalette = listOf(
     Color(0xFF82AAFF), Color(0xFFC3E88D), Color(0xFFFFCB6B), Color(0xFFF07178), Color(0xFFC792EA),
-    Color(0xFF89DDFF), Color(0xFFF78C6C), Color(0xFFFF5370), Color(0xFFFFCB6B), Color(0xFFA6ACCD),
+    Color(0xFF89DDFF), Color(0xFFF78C6C), Color(0xFFFF5370), Color(0xFFA6ACCD), Color(0xFF00C9A7),
     Color(0xFFFFFFFF), Color(0xFFE2E8F0), Color(0xFF94A3B8), Color(0xFF475569), Color(0xFF0F172A),
     Color(0xFFFFB4A2), Color(0xFFE5989B), Color(0xFFB5838D), Color(0xFF6D6875), Color(0xFF355070)
 )
@@ -48,6 +49,16 @@ fun ColorPickerSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
+
+    // Determine active tool's current size and appropriate range
+    val currentSize = toolConfig.currentActiveSize
+    val maxSize = if (toolConfig.activeTool == ToolType.PEN) 48f else 128f
+    val toolLabel = when (toolConfig.activeTool) {
+        ToolType.PEN -> "Pen"
+        ToolType.HIGHLIGHTER -> "Highlighter"
+        ToolType.ERASER -> "Eraser"
+        ToolType.SELECT -> "Pen"
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -68,17 +79,17 @@ fun ColorPickerSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Stroke Size Slider
+            // Stroke Size Slider — uses active tool's width
             Text(
-                text = "Stroke Width: ${toolConfig.strokeWidth.toInt()} px",
+                text = "$toolLabel Width: ${currentSize.toInt()} px",
                 color = Color.LightGray,
                 fontSize = 14.sp
             )
 
             Slider(
-                value = toolConfig.strokeWidth,
+                value = currentSize,
                 onValueChange = onStrokeWidthChanged,
-                valueRange = 2f..48f,
+                valueRange = 2f..maxSize,
                 colors = SliderDefaults.colors(
                     thumbColor = toolConfig.penColor,
                     activeTrackColor = toolConfig.penColor

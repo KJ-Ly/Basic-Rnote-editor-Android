@@ -2,7 +2,6 @@ package com.rnote.baby.ui.canvas
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import com.rnote.baby.model.InkPoint
 import com.rnote.baby.model.Stroke
 
 object SelectionManager {

@@ -17,11 +17,13 @@ object ImageExporter {
     fun exportToPng(
         document: NoteDocument,
         outputStream: OutputStream,
-        width: Int = 1920,
-        height: Int = 1080
+        width: Int = 0,
+        height: Int = 0
     ): Boolean {
+        val w = if (width > 0) width else document.paperStyle.effectivePageWidthPx.toInt().coerceAtLeast(1920)
+        val h = if (height > 0) height else document.paperStyle.effectivePageHeightPx.toInt().coerceAtLeast(1080)
         return try {
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
 
             // Fill background

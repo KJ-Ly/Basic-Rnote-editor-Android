@@ -17,7 +17,6 @@ import com.rnote.baby.model.RectShape
 import com.rnote.baby.model.RnoteNativeColor
 import com.rnote.baby.model.RnoteNativeDocument
 import com.rnote.baby.model.NoteDocument
-import com.rnote.baby.model.Stroke
 import com.rnote.baby.model.PaperPattern
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
@@ -84,7 +83,7 @@ object RnoteNativeSerializer {
             val minY = pts.minOfOrNull { it.y } ?: 0f
             val maxX = pts.maxOfOrNull { it.x } ?: 0f
             val maxY = pts.maxOfOrNull { it.y } ?: 0f
-            NativeBrushStroke(pts, stroke.strokeWidth, color, false, minX, minY, maxX, maxY)
+            NativeBrushStroke(pts, stroke.strokeWidth, color, stroke.isHighlighter, minX, minY, maxX, maxY)
         }
 
         // Include preserved native elements (text, shapes, images) in save-back

@@ -32,7 +32,6 @@ import com.rnote.baby.model.ToolConfig
 import com.rnote.baby.model.ToolType
 import com.rnote.baby.model.ViewportState
 import kotlin.math.hypot
-import kotlin.math.sqrt
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -56,7 +55,6 @@ fun DrawingCanvas(
 
     var isDrawing by remember { mutableStateOf(false) }
     var hoverOffset by remember { mutableStateOf<Offset?>(null) }
-    var lastUndoTriggerTime by remember { mutableStateOf(0L) }
     var isMovingSelection by remember { mutableStateOf(false) }
     var selectionDragStart by remember { mutableStateOf(Offset.Zero) }
     // Edge-trigger: tracks whether the side button was already down so undo

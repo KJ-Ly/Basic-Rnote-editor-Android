@@ -1,7 +1,6 @@
 package com.rnote.baby.storage
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
@@ -55,14 +54,17 @@ object RnoteNativeParser {
         val patternW: Float = 21f, val patternH: Float = 21f,
         val patternColor: RnoteNativeColor = RnoteNativeColor(0.8f, 0.9f, 1f, 1f)
     )
-    private var parsedLayout: String = ""
+    private data class ParsedDocResult(
+        val format: FormatConfig = FormatConfig(),
+        val bg: BgCfg = BgCfg(),
+        val totalHeight: Float = 0f,
+        val layout: String = ""
+    )
 
     // ── Root ──────────────────────────────────────────────────────────────────
 
     private fun parseRoot(reader: JsonReader): RnoteNativeDocument {
-        var format = FormatConfig()
-        var bg = BgCfg()
-        var totalHeight = 0f
+        var docResult = ParsedDocResult()
         val rawElements = mutableListOf<NativeCanvasElement?>()
         val chronoOrder = mutableListOf<Int>()
 
@@ -77,10 +79,7 @@ object RnoteNativeParser {
                                 reader.beginObject()
                                 while (reader.hasNext()) {
                                     when (reader.nextName()) {
-                                        "document"          -> {
-                                            val r = parseDocument(reader)
-                                            format = r.first; bg = r.second; totalHeight = r.third
-                                        }
+                                        "document"          -> docResult = parseDocument(reader)
                                         "stroke_components" -> parseStrokeComponents(reader, rawElements)
                                         "chrono_components" -> parseChronoComponents(reader, chronoOrder)
                                         else                -> reader.skipValue()
@@ -100,19 +99,19 @@ object RnoteNativeParser {
 
         val elements = buildOrderedElements(rawElements, chronoOrder)
         return RnoteNativeDocument(
-            pageWidth   = format.width,
-            pageHeight  = format.height,
-            totalHeight = if (totalHeight > 0f) totalHeight else format.height,
-            background  = NativeBackgroundConfig(bg.color, bg.pattern, bg.patternW, bg.patternH, bg.patternColor),
+            pageWidth   = docResult.format.width,
+            pageHeight  = docResult.format.height,
+            totalHeight = if (docResult.totalHeight > 0f) docResult.totalHeight else docResult.format.height,
+            background  = NativeBackgroundConfig(docResult.bg.color, docResult.bg.pattern, docResult.bg.patternW, docResult.bg.patternH, docResult.bg.patternColor),
             elements    = elements,
-            layout      = parsedLayout
+            layout      = docResult.layout
         )
     }
 
     // ── Document block ────────────────────────────────────────────────────────
 
-    private fun parseDocument(reader: JsonReader): Triple<FormatConfig, BgCfg, Float> {
-        var format = FormatConfig(); var bg = BgCfg(); var h = 0f
+    private fun parseDocument(reader: JsonReader): ParsedDocResult {
+        var format = FormatConfig(); var bg = BgCfg(); var h = 0f; var layout = ""
         reader.beginObject()
         while (reader.hasNext()) {
             when (reader.nextName()) {
@@ -122,7 +121,7 @@ object RnoteNativeParser {
                         when (reader.nextName()) {
                             "format"     -> format = parseFormatConfig(reader)
                             "background" -> bg     = parseBgConfig(reader)
-                            "layout"     -> parsedLayout = reader.nextString()
+                            "layout"     -> layout = reader.nextString()
                             else         -> reader.skipValue()
                         }
                     }
@@ -133,7 +132,7 @@ object RnoteNativeParser {
             }
         }
         reader.endObject()
-        return Triple(format, bg, h)
+        return ParsedDocResult(format, bg, h, layout)
     }
 
     private fun parseFormatConfig(reader: JsonReader): FormatConfig {

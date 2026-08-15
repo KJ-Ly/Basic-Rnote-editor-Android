@@ -374,7 +374,7 @@ class MainActivity : ComponentActivity() {
                         ColorPickerSheet(
                             toolConfig = toolConfig,
                             onColorSelected = { toolConfig = toolConfig.copy(penColor = it) },
-                            onStrokeWidthChanged = { toolConfig = toolConfig.copy(strokeWidth = it) },
+                            onStrokeWidthChanged = { toolConfig = toolConfig.updateActiveSize(it) },
                             onDismiss = { showColorPicker = false }
                         )
                     }
