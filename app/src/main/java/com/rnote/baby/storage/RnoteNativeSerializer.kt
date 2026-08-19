@@ -108,24 +108,27 @@ object RnoteNativeSerializer {
 
     private fun buildJson(doc: RnoteNativeDocument): String {
         val sb = StringBuilder()
-        sb.append("""{"data":{"engine_snapshot":{""")
+        sb.append("""{"version":"0.14.2","data":{"engine_snapshot":{""")
         sb.append(""""document":""")
         sb.appendDocument(doc)
-        sb.append(""","stroke_components":[""")
-
-        doc.elements.forEachIndexed { i, el ->
-            if (i > 0) sb.append(',')
-            sb.append("""{"value":""")
+        sb.append(""","camera":{"offset":[0.0,0.0],"size":[${doc.pageWidth},${doc.pageHeight}],"zoom":1.0}""")
+        // Rnote's stroke_components/chrono_components are backed by a slotmap whose index 0 is
+        // a reserved sentinel slot (never a real element) — real files always carry a leading
+        // {"value":null,"version":0} placeholder and start real elements at index 1. Omitting it
+        // breaks slot-key reconstruction and desktop Rnote refuses to open the file.
+        sb.append(""","stroke_components":[{"value":null,"version":0}""")
+        doc.elements.forEach { el ->
+            sb.append(",{\"value\":")
             sb.appendElement(el)
-            sb.append('}')
+            sb.append(""","version":1}""")
         }
 
-        sb.append("""],"chrono_components":[""")
-        doc.elements.indices.forEachIndexed { i, idx ->
-            if (i > 0) sb.append(',')
-            sb.append("""{"stroke_key":{"index":$idx,"generation":1}}""")
+        sb.append("""],"chrono_components":[{"value":null,"version":0}""")
+        doc.elements.forEachIndexed { i, el ->
+            val layer = if (el is NativeBrushStroke && el.isHighlighter) "\"highlighter\"" else """{"user_layer":0}"""
+            sb.append(""",{"value":{"t":${i + 1},"layer":$layer},"version":1}""")
         }
-        sb.append("]}}}}")
+        sb.append("""],"chrono_counter":${doc.elements.size}}}}""")
         return sb.toString()
     }
 
@@ -143,6 +146,9 @@ object RnoteNativeSerializer {
             |    "pattern_color":${bg.patternColor.toJson()}
             |  }
             |},
+            |"x":0.0,
+            |"y":0.0,
+            |"width":${doc.pageWidth},
             |"height":${doc.totalHeight}
             |}""".trimMargin().replace("\n", ""))
     }
@@ -162,15 +168,41 @@ object RnoteNativeSerializer {
 
     private fun StringBuilder.appendBrushStroke(el: NativeBrushStroke) {
         append("""{"brushstroke":{""")
-        append(""""path":{"elements":[""")
-        el.points.forEachIndexed { i, pt ->
-            if (i > 0) append(',')
-            append("""{"pos":[${pt.x},${pt.y}],"pressure":${pt.pressure}}""")
+        append(""""path":""")
+        appendPenPath(el.points)
+        append(""","style":""")
+        appendSmoothStyle(el.color, el.strokeWidth)
+        append("""}}""")
+    }
+
+    /** Rnote's `PenPath`: a required `start` element plus a list of `segments` (no legacy alias). */
+    private fun StringBuilder.appendPenPath(points: List<com.rnote.baby.model.NativeStrokePoint>) {
+        append("""{"start":""")
+        appendPathPoint(points.firstOrNull() ?: com.rnote.baby.model.NativeStrokePoint(0f, 0f, 0f))
+        append(""","segments":[""")
+        for (i in 1 until points.size) {
+            if (i > 1) append(',')
+            append("""{"lineto":{"end":""")
+            appendPathPoint(points[i])
+            append("""}}""")
         }
-        append("""]},"style":{"Smooth":{""")
-        append(""""stroke_color":${el.color.toJson()},""")
-        append(""""stroke_width":${el.strokeWidth}""")
-        append("""}},"brush":{"BrushStyle":"${if (el.isHighlighter) "Highlighter" else "Marker"}"}}}""")
+        append("]}")
+    }
+
+    private fun StringBuilder.appendPathPoint(pt: com.rnote.baby.model.NativeStrokePoint) {
+        append("""{"pos":[${pt.x},${pt.y}],"pressure":${pt.pressure}}""")
+    }
+
+    /** Rnote's `Style` enum is externally tagged with lowercase variant names (e.g. "smooth"). */
+    private fun StringBuilder.appendSmoothStyle(color: RnoteNativeColor, strokeWidth: Float) {
+        append("""{"smooth":{""")
+        append(""""stroke_color":${color.toJson()},""")
+        append(""""stroke_width":$strokeWidth,""")
+        append(""""fill_color":{"r":0.0,"g":0.0,"b":0.0,"a":0.0},""")
+        append(""""pressure_curve":"linear",""")
+        append(""""line_style":"solid",""")
+        append(""""line_cap":"straight"""")
+        append("}}")
     }
 
     // ── TextElement ───────────────────────────────────────────────────────────
@@ -216,18 +248,13 @@ object RnoteNativeSerializer {
             is RectShape    -> append(""""Rectangle":{"top_left":[${s.x},${s.y}],"size":[${s.w},${s.h}]}""")
             is EllipseShape -> append(""""Ellipse":{"center":[${s.cx},${s.cy}],"radii":[${s.rx},${s.ry}]}""")
             is FreehandShape -> {
-                append(""""FreehandPen":{"elements":[""")
-                s.points.forEachIndexed { i, pt ->
-                    if (i > 0) append(',')
-                    append("""{"pos":[${pt.x},${pt.y}],"pressure":${pt.pressure}}""")
-                }
-                append("]}")
+                append(""""FreehandPen":""")
+                appendPenPath(s.points)
             }
         }
-        append("""},"style":{"Smooth":{""")
-        append(""""stroke_color":${el.color.toJson()},""")
-        append(""""stroke_width":${el.strokeWidth}""")
-        append("}}}}}")
+        append("""},"style":""")
+        appendSmoothStyle(el.color, el.strokeWidth)
+        append("}}")
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -66,7 +66,7 @@ object RnoteNativeParser {
     private fun parseRoot(reader: JsonReader): RnoteNativeDocument {
         var docResult = ParsedDocResult()
         val rawElements = mutableListOf<NativeCanvasElement?>()
-        val chronoOrder = mutableListOf<Int>()
+        val chronoOrder = mutableListOf<ChronoEntry>()
 
         reader.beginObject()
         while (reader.hasNext()) {
@@ -552,10 +552,13 @@ object RnoteNativeParser {
 
     // ── chrono_components ─────────────────────────────────────────────────────
 
-    private fun parseChronoComponents(reader: JsonReader, out: MutableList<Int>) {
+    /** Chrono-order entry: which stroke_components slot it points to, and whether its layer is "highlighter". */
+    private data class ChronoEntry(val strokeIndex: Int, val isHighlighter: Boolean)
+
+    private fun parseChronoComponents(reader: JsonReader, out: MutableList<ChronoEntry>) {
         reader.beginArray()
         while (reader.hasNext()) {
-            // Each item: {"value": {"t": index, ...} | null, "version": N}
+            // Each item: {"value": {"t": index, "layer": "highlighter" | {"user_layer": N}} | null, "version": N}
             reader.beginObject()
             while (reader.hasNext()) {
                 when (reader.nextName()) {
@@ -563,27 +566,48 @@ object RnoteNativeParser {
                         if (reader.peek() == JsonToken.NULL) {
                             reader.nextNull()
                         } else {
+                            var t = -1
+                            var isHighlighter = false
                             reader.beginObject()
                             while (reader.hasNext()) {
                                 when (reader.nextName()) {
-                                    // v0.14: {"t": index}
-                                    "t" -> out.add(reader.nextInt())
+                                    // v0.14: {"t": index, "layer": ...}
+                                    "t"     -> t = reader.nextInt()
+                                    "layer" -> isHighlighter = parseLayerIsHighlighter(reader)
                                     // Old: {"stroke_key": {"index": N}}
-                                    "stroke_key" -> out.add(parseStrokeKey(reader))
+                                    "stroke_key" -> t = parseStrokeKey(reader)
                                     else -> reader.skipValue()
                                 }
                             }
                             reader.endObject()
+                            if (t >= 0) out.add(ChronoEntry(t, isHighlighter))
                         }
                     }
                     // Old format without value wrapper
-                    "stroke_key" -> out.add(parseStrokeKey(reader))
+                    "stroke_key" -> out.add(ChronoEntry(parseStrokeKey(reader), false))
                     else -> reader.skipValue()
                 }
             }
             reader.endObject()
         }
         reader.endArray()
+    }
+
+    /** `StrokeLayer` is externally tagged: unit variants (e.g. `Highlighter`) serialize as a bare
+     * string "highlighter"; tuple variants (e.g. `UserLayer(0)`) serialize as `{"user_layer": 0}`. */
+    private fun parseLayerIsHighlighter(reader: JsonReader): Boolean {
+        return if (reader.peek() == JsonToken.STRING) {
+            reader.nextString().equals("highlighter", ignoreCase = true)
+        } else {
+            var highlighter = false
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName().equals("highlighter", ignoreCase = true)) highlighter = true
+                reader.skipValue()
+            }
+            reader.endObject()
+            highlighter
+        }
     }
 
     private fun parseStrokeKey(reader: JsonReader): Int {
@@ -605,10 +629,15 @@ object RnoteNativeParser {
 
     private fun buildOrderedElements(
         raw: List<NativeCanvasElement?>,
-        order: List<Int>
+        order: List<ChronoEntry>
     ): List<NativeCanvasElement> {
         if (order.isEmpty()) return raw.filterNotNull()
-        return order.mapNotNull { idx -> raw.getOrNull(idx) }
+        return order.mapNotNull { entry ->
+            val el = raw.getOrNull(entry.strokeIndex) ?: return@mapNotNull null
+            if (entry.isHighlighter && el is NativeBrushStroke && !el.isHighlighter) {
+                el.copy(isHighlighter = true)
+            } else el
+        }
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────

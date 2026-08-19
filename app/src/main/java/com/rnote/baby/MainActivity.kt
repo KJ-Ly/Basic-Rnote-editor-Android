@@ -48,7 +48,9 @@ class MainActivity : ComponentActivity() {
     // Storage Activity Launchers
     private var pendingDocumentToSave: NoteDocument? = null
     private var pendingDocumentToExport: NoteDocument? = null
-    private var saveAsRnote: Boolean = false
+    // Defaults to true since the app's whole purpose is desktop Rnote interop —
+    // a brand-new note should save as .rnote, not fall back to our internal .json format.
+    private var saveAsRnote: Boolean = true
 
     // Called after save so we can clear isModified
     private var onSaveSucceeded: (() -> Unit)? = null
