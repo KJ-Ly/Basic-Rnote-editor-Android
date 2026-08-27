@@ -82,7 +82,10 @@ data class ToolConfig(
 
     /** Returns a copy with updated active tool stroke size. */
     fun updateActiveSize(newSize: Float): ToolConfig {
-        val clamped = newSize.coerceIn(1f, 128f)
+        // Desktop Rnote's BrushConfig::STROKE_WIDTH_MIN / STROKE_WIDTH_MAX. The old 1f
+        // floor sat above the range the spin button steps through (0.1 below width 12),
+        // so the smallest widths desktop can express were unreachable here.
+        val clamped = newSize.coerceIn(0.1f, 500f)
         return when {
             activeTool == ToolType.ERASER -> copy(eraserWidth = clamped)
             isMarker -> copy(highlighterWidth = clamped)

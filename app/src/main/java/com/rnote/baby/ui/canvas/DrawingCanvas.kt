@@ -19,8 +19,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke as CanvasStrokeStyle
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInteropFilter
@@ -28,10 +26,14 @@ import androidx.compose.ui.platform.LocalDensity
 import com.rnote.baby.model.BrushStyle
 import com.rnote.baby.model.InkPoint
 import com.rnote.baby.model.PaperStyle
+import com.rnote.baby.model.PressureCurve
 import com.rnote.baby.model.Stroke
+import com.rnote.baby.model.StrokePoint
 import com.rnote.baby.model.ToolConfig
 import com.rnote.baby.model.ToolType
 import com.rnote.baby.model.ViewportState
+import com.rnote.baby.render.composeStrokePath
+import java.util.IdentityHashMap
 import kotlin.math.hypot
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -52,6 +54,8 @@ fun DrawingCanvas(
 ) {
     val density = LocalDensity.current.density
     val currentPoints = remember { mutableStateListOf<InkPoint>() }
+    /** Memoised stroke outlines, keyed by Stroke identity. See the draw block below. */
+    val outlineCache = remember { IdentityHashMap<Stroke, Path>() }
     val lassoPoints = remember { mutableStateListOf<Offset>() }
     // selectedStrokes is owned by the caller (MainActivity) so it can be read for delete
 
@@ -149,12 +153,21 @@ fun DrawingCanvas(
                 val canvasPos = viewportState.screenToCanvas(Offset(screenX, screenY))
                 val x = canvasPos.x
                 val y = canvasPos.y
-                val rawPressure = motionEvent.pressure.coerceIn(0.05f, 2.0f)
                 val toolType = motionEvent.getToolType(0)
                 val buttonState = motionEvent.buttonState
 
                 val isStylus = toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
                 val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER || toolType == MotionEvent.TOOL_TYPE_UNKNOWN
+
+                // Rnote treats pressure as [0, 1] and substitutes Element::PRESSURE_DEFAULT
+                // where the device reports none — which is what desktop records for every
+                // mouse stroke. Passing Android's finger "pressure" through instead would
+                // make a finger-drawn stroke here twice the width of the same stroke there.
+                val rawPressure = if (isStylus) {
+                    motionEvent.pressure.coerceIn(0f, 1f)
+                } else {
+                    StrokePoint.PRESSURE_DEFAULT
+                }
 
                 val hasStylusPrimaryButton = (buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
                 val hasStylusSecondaryButton = (buttonState and MotionEvent.BUTTON_STYLUS_SECONDARY) != 0
@@ -277,23 +290,18 @@ fun DrawingCanvas(
                             } else if (activeTool == ToolType.BRUSH && currentPoints.isNotEmpty()) {
                                 val isMarker = toolConfig.brushStyle == BrushStyle.MARKER
 
-                                val avgPressure = currentPoints.map { it.pressure }.average().toFloat()
-                                val baseWidth = toolConfig.currentActiveSize
-
-                                val finalWidth = if (toolConfig.isPressureSensitive && isStylus) {
-                                    baseWidth * (0.35f + 1.15f * avgPressure)
-                                } else {
-                                    baseWidth
-                                }
-
                                 onAddStroke(
                                     Stroke(
                                         points = currentPoints.toList(),
                                         color = toolConfig.currentActiveColor,
-                                        strokeWidth = finalWidth,
+                                        // The picker's number, stored as-is. Pressure is
+                                        // already on every point and gets applied at draw
+                                        // time by the curve below; folding it in here too
+                                        // made desktop Rnote apply it a second time.
+                                        strokeWidth = toolConfig.currentActiveSize,
                                         toolType = activeTool,
                                         isHighlighter = isMarker,
-                                        alpha = if (isMarker) 0.35f else 1.0f
+                                        pressureCurve = pressureCurveFor(toolConfig)
                                     )
                                 )
                             }
@@ -321,44 +329,33 @@ fun DrawingCanvas(
             translate(viewportState.panOffset.x, viewportState.panOffset.y)
             scale(viewportState.effectiveScale, viewportState.effectiveScale, Offset.Zero)
         }) {
-            // 2. Render existing strokes
+            // 2. Render existing strokes.
+            // Filled variable-width outlines, not constant-width stroked paths — see
+            // StrokeOutline for why that's the only way the width can match desktop.
+            // Outlines are ~4x the work of the old polyline, so they're memoised on the
+            // Stroke instance; strokes are immutable, and every edit path (translate,
+            // scale) produces a fresh copy, so identity is a safe key.
+            if (outlineCache.size > strokes.size * 2 + 64) outlineCache.clear()
             strokes.forEach { stroke ->
-                val path = InkSmoother.createSmoothPath(stroke.points)
-                val strokeCap = if (stroke.isHighlighter) StrokeCap.Square else StrokeCap.Round
-
-                drawPath(
-                    path = path,
-                    color = stroke.color,
-                    alpha = stroke.alpha,
-                    style = CanvasStrokeStyle(
-                        width = stroke.width,
-                        cap = strokeCap,
-                        join = StrokeJoin.Round
-                    )
-                )
+                val path = outlineCache.getOrPut(stroke) {
+                    composeStrokePath(stroke.points, stroke.strokeWidth, stroke.pressureCurve)
+                }
+                drawPath(path = path, color = stroke.color)
             }
 
             // 3. Render active stroke preview
             val activeTool = toolConfig.activeTool
             if (isDrawing && currentPoints.isNotEmpty() && activeTool == ToolType.BRUSH) {
                 val isMarker = toolConfig.brushStyle == BrushStyle.MARKER
-                val path = InkSmoother.createSmoothPath(currentPoints)
-                val color = toolConfig.currentActiveColor
-                val lastPressure = currentPoints.last().pressure
-                val baseWidth = toolConfig.currentActiveSize
-                val previewWidth = if (toolConfig.isPressureSensitive) baseWidth * (0.35f + 1.15f * lastPressure) else baseWidth
-                val alpha = if (isMarker) 0.35f else 1.0f
-
-                drawPath(
-                    path = path,
-                    color = color,
-                    alpha = alpha,
-                    style = CanvasStrokeStyle(
-                        width = previewWidth,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
-                    )
+                // Built the same way as a committed stroke, so what's under the nib is
+                // what gets saved — the old preview used only the latest pressure and so
+                // showed one uniform width for a stroke that would be drawn tapered.
+                val path = composeStrokePath(
+                    currentPoints,
+                    toolConfig.currentActiveSize,
+                    pressureCurveFor(toolConfig)
                 )
+                drawPath(path = path, color = toolConfig.currentActiveColor)
             }
 
             // 4. Render lasso polygon preview
@@ -414,6 +411,18 @@ fun DrawingCanvas(
             }
         }
     }
+}
+
+/**
+ * The pressure curve a stroke drawn with [toolConfig] should carry, following how
+ * desktop Rnote configures its own brushes in `pensconfig/brushconfig.rs`.
+ */
+private fun pressureCurveFor(toolConfig: ToolConfig): PressureCurve = when {
+    // Rnote's MarkerOptions pin the curve to Const: a marker is a constant-width nib.
+    toolConfig.brushStyle == BrushStyle.MARKER -> PressureCurve.CONST
+    // Our "pressure sensitivity" switch is the same choice Rnote exposes as the curve.
+    !toolConfig.isPressureSensitive -> PressureCurve.CONST
+    else -> PressureCurve.LINEAR
 }
 
 private fun eraseStrokesNear(

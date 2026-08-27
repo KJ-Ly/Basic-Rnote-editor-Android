@@ -146,7 +146,8 @@ object FileManager {
                         points = el.points.map { StrokePoint(it.x, it.y, it.pressure) },
                         color  = color,
                         strokeWidth = el.strokeWidth,
-                        isHighlighter = el.isHighlighter
+                        isHighlighter = el.isHighlighter,
+                        pressureCurve = el.pressureCurve
                     )
                 }
                 // Non-stroke elements: preserved in nativeElements, not yet editable

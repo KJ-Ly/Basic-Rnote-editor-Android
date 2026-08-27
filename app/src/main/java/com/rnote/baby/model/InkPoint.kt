@@ -2,7 +2,7 @@ package com.rnote.baby.model
 
 /**
  * Legacy alias — new code should use [StrokePoint] directly.
- * Kept so existing DrawingCanvas, InkSmoother, SelectionManager, etc. compile unchanged.
+ * Kept so existing DrawingCanvas, SelectionManager, etc. compile unchanged.
  */
 typealias InkPoint = StrokePoint
 

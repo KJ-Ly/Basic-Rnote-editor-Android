@@ -16,6 +16,7 @@ import com.rnote.baby.model.NativeCanvasElement
 import com.rnote.baby.model.NativePatternType
 import com.rnote.baby.model.NativeShapeElement
 import com.rnote.baby.model.NativeStrokePoint
+import com.rnote.baby.model.PressureCurve
 import com.rnote.baby.model.NativeTextElement
 import com.rnote.baby.model.RectShape
 import com.rnote.baby.model.RnoteNativeColor
@@ -228,6 +229,7 @@ object RnoteNativeParser {
         var color = RnoteNativeColor.BLACK
         var width = 2f
         var isHighlighter = false
+        var pressureCurve = PressureCurve.DEFAULT
 
         reader.beginObject()
         while (reader.hasNext()) {
@@ -243,6 +245,10 @@ object RnoteNativeParser {
                                     when (reader.nextName()) {
                                         "stroke_color" -> color = parseColor(reader)
                                         "stroke_width" -> width = reader.nextDouble().toFloat()
+                                        // Without this the stroke's painted width is
+                                        // unknowable — see [PressureCurve].
+                                        "pressure_curve" ->
+                                            pressureCurve = PressureCurve.fromApiName(reader.nextString())
                                         else           -> reader.skipValue()
                                     }
                                 }
@@ -275,7 +281,7 @@ object RnoteNativeParser {
         if (pts.isEmpty()) return null
         val minX = pts.minOf { it.x }; val minY = pts.minOf { it.y }
         val maxX = pts.maxOf { it.x }; val maxY = pts.maxOf { it.y }
-        return NativeBrushStroke(pts, width, color, isHighlighter, minX, minY, maxX, maxY)
+        return NativeBrushStroke(pts, width, color, isHighlighter, minX, minY, maxX, maxY, pressureCurve)
     }
 
     private fun parsePath(reader: JsonReader): List<NativeStrokePoint> {

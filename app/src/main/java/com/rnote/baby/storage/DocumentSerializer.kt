@@ -40,7 +40,6 @@ object DocumentSerializer {
             strokeObj.put("color", stroke.color.toArgb())
             strokeObj.put("width", stroke.strokeWidth.toDouble())
             strokeObj.put("toolType", stroke.toolType.name)
-            strokeObj.put("alpha", stroke.alpha.toDouble())
 
             val pointsArray = JSONArray()
             for (pt in stroke.points) {
@@ -115,7 +114,6 @@ object DocumentSerializer {
                         ToolType.BRUSH
                     }
                 }
-                val alpha = strokeObj.optDouble("alpha", 1.0).toFloat()
 
                 val pointsList = mutableListOf<InkPoint>()
                 if (strokeObj.has("points")) {
@@ -136,8 +134,7 @@ object DocumentSerializer {
                         points = pointsList,
                         color = Color(colorInt),
                         strokeWidth = width,
-                        toolType = toolType,
-                        alpha = alpha
+                        toolType = toolType
                     )
                 )
             }

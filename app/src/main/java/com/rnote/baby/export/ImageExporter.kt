@@ -3,9 +3,9 @@ package com.rnote.baby.export
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
 import androidx.compose.ui.graphics.toArgb
 import com.rnote.baby.model.NoteDocument
+import com.rnote.baby.render.androidStrokePath
 import java.io.OutputStream
 
 object ImageExporter {
@@ -28,40 +28,26 @@ object ImageExporter {
             // Fill background
             canvas.drawColor(document.paperStyle.currentBackgroundColor.toArgb())
 
-            // Paint setup
+            // Strokes are filled outlines, not stroked paths — `stroke.strokeWidth` is a
+            // nominal maximum that the pressure curve scales per point, so there is no
+            // single Paint.strokeWidth that would be correct. See StrokeOutline.
             val paint = Paint().apply {
                 isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeJoin = Paint.Join.ROUND
+                style = Paint.Style.FILL
             }
 
             // Render strokes
             for (stroke in document.strokes) {
                 if (stroke.points.isEmpty()) continue
 
+                // toArgb() carries the alpha; setting paint.alpha on top of it used to
+                // overwrite a loaded marker's transparency with full opacity.
                 paint.color = stroke.color.toArgb()
-                paint.strokeWidth = stroke.width
-                paint.alpha = (stroke.alpha * 255).toInt()
-                paint.strokeCap = if (stroke.isHighlighter) Paint.Cap.SQUARE else Paint.Cap.ROUND
 
-                val path = Path()
-                path.moveTo(stroke.points[0].x, stroke.points[0].y)
-
-                if (stroke.points.size == 1) {
-                    path.addCircle(stroke.points[0].x, stroke.points[0].y, stroke.width / 2f, Path.Direction.CW)
-                } else {
-                    for (i in 1 until stroke.points.size - 1) {
-                        val curr = stroke.points[i]
-                        val next = stroke.points[i + 1]
-                        val midX = (curr.x + next.x) / 2f
-                        val midY = (curr.y + next.y) / 2f
-                        path.quadTo(curr.x, curr.y, midX, midY)
-                    }
-                    val last = stroke.points.last()
-                    path.lineTo(last.x, last.y)
-                }
-
-                canvas.drawPath(path, paint)
+                canvas.drawPath(
+                    androidStrokePath(stroke.points, stroke.strokeWidth, stroke.pressureCurve),
+                    paint
+                )
             }
 
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)

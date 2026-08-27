@@ -17,6 +17,7 @@ import com.rnote.baby.model.RectShape
 import com.rnote.baby.model.RnoteNativeColor
 import com.rnote.baby.model.RnoteNativeDocument
 import com.rnote.baby.model.NoteDocument
+import com.rnote.baby.model.PressureCurve
 import com.rnote.baby.model.PaperPattern
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
@@ -73,8 +74,10 @@ object RnoteNativeSerializer {
         val pageH = doc.paperStyle.effectivePageHeightPx
 
         val nativeStrokes: List<NativeCanvasElement> = doc.strokes.map { stroke ->
+            // Rnote's `Element::new` clamps pressure to [0, 1] and its serde reader
+            // assumes that range; Android reports stylus pressure that can exceed 1.0.
             val pts = stroke.points.map {
-                com.rnote.baby.model.NativeStrokePoint(it.x, it.y, it.pressure)
+                com.rnote.baby.model.NativeStrokePoint(it.x, it.y, it.pressure.coerceIn(0f, 1f))
             }
             val color = RnoteNativeColor(
                 stroke.color.red, stroke.color.green, stroke.color.blue, stroke.color.alpha
@@ -83,7 +86,10 @@ object RnoteNativeSerializer {
             val minY = pts.minOfOrNull { it.y } ?: 0f
             val maxX = pts.maxOfOrNull { it.x } ?: 0f
             val maxY = pts.maxOfOrNull { it.y } ?: 0f
-            NativeBrushStroke(pts, stroke.strokeWidth, color, stroke.isHighlighter, minX, minY, maxX, maxY)
+            NativeBrushStroke(
+                pts, stroke.strokeWidth, color, stroke.isHighlighter,
+                minX, minY, maxX, maxY, stroke.pressureCurve
+            )
         }
 
         // Include preserved native elements (text, shapes, images) in save-back
@@ -171,7 +177,7 @@ object RnoteNativeSerializer {
         append(""""path":""")
         appendPenPath(el.points)
         append(""","style":""")
-        appendSmoothStyle(el.color, el.strokeWidth)
+        appendSmoothStyle(el.color, el.strokeWidth, el.pressureCurve)
         append("""}}""")
     }
 
@@ -194,12 +200,18 @@ object RnoteNativeSerializer {
     }
 
     /** Rnote's `Style` enum is externally tagged with lowercase variant names (e.g. "smooth"). */
-    private fun StringBuilder.appendSmoothStyle(color: RnoteNativeColor, strokeWidth: Float) {
+    private fun StringBuilder.appendSmoothStyle(
+        color: RnoteNativeColor,
+        strokeWidth: Float,
+        pressureCurve: PressureCurve = PressureCurve.DEFAULT
+    ) {
         append("""{"smooth":{""")
         append(""""stroke_color":${color.toJson()},""")
         append(""""stroke_width":$strokeWidth,""")
         append(""""fill_color":{"r":0.0,"g":0.0,"b":0.0,"a":0.0},""")
-        append(""""pressure_curve":"linear",""")
+        // Hard-coding "linear" here made every Marker stroke taper with pressure in
+        // desktop Rnote, which defines its Marker brush as PressureCurve::Const.
+        append(""""pressure_curve":"${pressureCurve.apiName}",""")
         append(""""line_style":"solid",""")
         append(""""line_cap":"straight"""")
         append("}}")
