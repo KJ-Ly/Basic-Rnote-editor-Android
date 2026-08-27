@@ -61,7 +61,9 @@ data class ToolConfig(
     val highlighterColor: Color = Color(0xFFF6D32D).copy(alpha = 0.35f), // Semi-transparent yellow, used by Brush/Marker
     val strokeWidth: Float = 2f,           // Brush (Solid) stroke width in canvas px — matches Rnote's default (SmoothOptions stroke_width: 2.0)
     val highlighterWidth: Float = 12f,     // Brush (Marker) width in canvas px — matches Rnote's MarkerOptions fixed default
-    val eraserWidth: Float = 4f,           // Eraser radius/width in canvas px — matches Rnote's eraser Small preset default
+    // Rnote's EraserConfig::WIDTH_DEFAULT is 12.0, which is deliberately not one of the
+    // 4/9/24 palette presets — a fresh eraser starts between Small and Medium.
+    val eraserWidth: Float = 12f,          // Eraser square side in canvas units
     val isPressureSensitive: Boolean = true,
     /** When false (default), only stylus/S-Pen input can draw. Finger touch is reserved for pan & zoom. */
     val allowFingerDrawing: Boolean = false
@@ -82,10 +84,12 @@ data class ToolConfig(
 
     /** Returns a copy with updated active tool stroke size. */
     fun updateActiveSize(newSize: Float): ToolConfig {
-        // Desktop Rnote's BrushConfig::STROKE_WIDTH_MIN / STROKE_WIDTH_MAX. The old 1f
-        // floor sat above the range the spin button steps through (0.1 below width 12),
-        // so the smallest widths desktop can express were unreachable here.
-        val clamped = newSize.coerceIn(0.1f, 500f)
+        // Desktop Rnote's per-tool limits: BrushConfig::STROKE_WIDTH_MIN / _MAX are
+        // 0.1 / 500, EraserConfig::WIDTH_MIN / _MAX are 1 / 500. The old flat 1f floor
+        // sat above the range the spin button steps through for a brush (0.1 below
+        // width 12), so the finest widths desktop can express were unreachable here.
+        val minWidth = if (activeTool == ToolType.ERASER) 1f else 0.1f
+        val clamped = newSize.coerceIn(minWidth, 500f)
         return when {
             activeTool == ToolType.ERASER -> copy(eraserWidth = clamped)
             isMarker -> copy(highlighterWidth = clamped)

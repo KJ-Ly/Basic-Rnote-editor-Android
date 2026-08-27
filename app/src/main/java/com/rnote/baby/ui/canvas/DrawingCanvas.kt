@@ -22,7 +22,6 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke as CanvasStrokeStyle
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInteropFilter
-import androidx.compose.ui.platform.LocalDensity
 import com.rnote.baby.model.BrushStyle
 import com.rnote.baby.model.InkPoint
 import com.rnote.baby.model.PaperStyle
@@ -49,10 +48,10 @@ fun DrawingCanvas(
     onEraseStrokes: (List<Stroke>) -> Unit,
     onSelectionDragStart: () -> Unit = {},
     onStrokesModified: (List<Stroke>) -> Unit,
-    onUndoRequested: () -> Unit,
+    /** Called once per eraser gesture, before the first stroke of it is removed. */
+    onEraseStart: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val density = LocalDensity.current.density
     val currentPoints = remember { mutableStateListOf<InkPoint>() }
     /** Memoised stroke outlines, keyed by Stroke identity. See the draw block below. */
     val outlineCache = remember { IdentityHashMap<Stroke, Path>() }
@@ -67,9 +66,16 @@ fun DrawingCanvas(
     // actual movement — not one per ACTION_MOVE frame, and not on a drag that
     // starts but never moves.
     var selectionMoveSnapshotTaken by remember { mutableStateOf(false) }
-    // Edge-trigger: tracks whether the side button was already down so undo
-    // fires exactly once per press, not repeatedly while the button is held.
-    var sideButtonWasDown by remember { mutableStateOf(false) }
+    // Latched at ACTION_DOWN: a gesture that began with the S-Pen side button held (or
+    // with the pen's eraser end) erases for its whole duration, even if the button is
+    // released halfway through. Deciding per-event instead would switch tools mid-stroke.
+    var buttonEraserLatched by remember { mutableStateOf(false) }
+    // One undo snapshot per eraser gesture, not one per frame that happens to hit ink.
+    var eraseSnapshotTaken by remember { mutableStateOf(false) }
+    // Where to paint the eraser square, in canvas units, and whether the pen is touching.
+    // Rnote shows it in both states (EraserState::Proximity and ::Down) with different fills.
+    var eraserCursor by remember { mutableStateOf<Offset?>(null) }
+    var eraserCursorDown by remember { mutableStateOf(false) }
 
     // 2-finger pan/zoom tracking — done manually inside pointerInteropFilter
     // to avoid the pointerInput vs pointerInteropFilter conflict
@@ -80,7 +86,10 @@ fun DrawingCanvas(
     // 1-finger pan tracking (used when finger drawing is disabled)
     var lastFingerPanPosition by remember { mutableStateOf<Offset?>(null) }
 
-    val eraserRadiusPx = (toolConfig.eraserWidth * density * 1.5f).coerceAtLeast(48f)
+    // Rnote's eraser is `width` canvas units across, full stop — no density factor, no
+    // 1.5x, no screen-space floor. Those made the tool a different physical size from
+    // desktop's and stopped it scaling with zoom the way the ink it erases does.
+    val eraserWidth = toolConfig.eraserWidth
 
     Canvas(
         modifier = modifier
@@ -194,37 +203,49 @@ fun DrawingCanvas(
                     return@pointerInteropFilter true
                 }
 
-                // S-Pen side button → Undo, fires once per press (edge-triggered)
-                val sPenSideButtonPressed = hasStylusPrimaryButton || hasStylusSecondaryButton || hasSecondaryButton
-                if (sPenSideButtonPressed) {
-                    if (!sideButtonWasDown) {
-                        // Leading edge: button just went down — fire undo once
-                        sideButtonWasDown = true
-                        onUndoRequested()
-                    }
-                    // Button still held — do nothing further
-                    return@pointerInteropFilter true
-                } else {
-                    // Trailing edge: button released — arm for next press
-                    sideButtonWasDown = false
-                }
+                // Hold the S-Pen side button to erase. Devices disagree on which bit the
+                // barrel button sets, so all three are accepted; TOOL_TYPE_ERASER covers
+                // styluses that report a flipped-to-eraser end instead of a button.
+                val sPenSideButtonPressed =
+                    hasStylusPrimaryButton || hasStylusSecondaryButton || hasSecondaryButton
+                val eraserTipInUse = toolType == MotionEvent.TOOL_TYPE_ERASER
+                val eraserRequestedNow = sPenSideButtonPressed || eraserTipInUse
 
-                val activeTool = toolConfig.activeTool
+                // Mid-gesture the latch decides; while hovering, the live state does, so
+                // the cursor switches to the eraser square as soon as the button goes down.
+                val activeTool = when {
+                    isDrawing && buttonEraserLatched -> ToolType.ERASER
+                    isDrawing -> toolConfig.activeTool
+                    eraserRequestedNow -> ToolType.ERASER
+                    else -> toolConfig.activeTool
+                }
 
                 when (motionEvent.actionMasked) {
                     MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
-                        if (isStylus) hoverOffset = Offset(screenX, screenY)
+                        if (isStylus) {
+                            if (activeTool == ToolType.ERASER) {
+                                hoverOffset = null
+                                eraserCursor = Offset(x, y)
+                                eraserCursorDown = false
+                            } else {
+                                eraserCursor = null
+                                hoverOffset = Offset(screenX, screenY)
+                            }
+                        }
                         true
                     }
 
                     MotionEvent.ACTION_HOVER_EXIT -> {
                         hoverOffset = null
+                        eraserCursor = null
                         true
                     }
 
                     MotionEvent.ACTION_DOWN -> {
                         hoverOffset = null
                         isDrawing = true
+                        buttonEraserLatched = eraserRequestedNow
+                        eraseSnapshotTaken = false
 
                         val boundingBox = SelectionManager.calculateBoundingBox(selectedStrokes)
                         if (activeTool == ToolType.SELECTOR && boundingBox != null) {
@@ -248,7 +269,11 @@ fun DrawingCanvas(
                         lassoPoints.add(Offset(x, y))
 
                         if (activeTool == ToolType.ERASER) {
-                            eraseStrokesNear(Offset(x, y), eraserRadiusPx / viewportState.effectiveScale, strokes, onEraseStrokes)
+                            eraserCursor = Offset(x, y)
+                            eraserCursorDown = true
+                            eraseAt(Offset(x, y), eraserWidth, strokes, onEraseStrokes) {
+                                if (!eraseSnapshotTaken) { onEraseStart(); eraseSnapshotTaken = true }
+                            }
                         }
                         true
                     }
@@ -273,7 +298,11 @@ fun DrawingCanvas(
                             lassoPoints.add(Offset(x, y))
 
                             if (activeTool == ToolType.ERASER) {
-                                eraseStrokesNear(Offset(x, y), eraserRadiusPx / viewportState.effectiveScale, strokes, onEraseStrokes)
+                                eraserCursor = Offset(x, y)
+                                eraserCursorDown = true
+                                eraseAt(Offset(x, y), eraserWidth, strokes, onEraseStrokes) {
+                                    if (!eraseSnapshotTaken) { onEraseStart(); eraseSnapshotTaken = true }
+                                }
                             }
                         }
                         true
@@ -309,6 +338,12 @@ fun DrawingCanvas(
                             lassoPoints.clear()
                         }
                         isDrawing = false
+                        buttonEraserLatched = false
+                        eraseSnapshotTaken = false
+                        eraserCursorDown = false
+                        // The pen may still be hovering; the square is repainted by the
+                        // next hover event, and hidden if the pen has left entirely.
+                        eraserCursor = null
                         true
                     }
 
@@ -344,7 +379,10 @@ fun DrawingCanvas(
             }
 
             // 3. Render active stroke preview
-            val activeTool = toolConfig.activeTool
+            // Must agree with the input handler's latch, or a gesture that started with
+            // the side button held would paint an ink preview while it erased.
+            val activeTool =
+                if (buttonEraserLatched) ToolType.ERASER else toolConfig.activeTool
             if (isDrawing && currentPoints.isNotEmpty() && activeTool == ToolType.BRUSH) {
                 val isMarker = toolConfig.brushStyle == BrushStyle.MARKER
                 // Built the same way as a committed stroke, so what's under the nib is
@@ -390,25 +428,37 @@ fun DrawingCanvas(
                     )
                 )
             }
-        }
 
-        // 6. Render hover cursor (screen space)
-        hoverOffset?.let { hoverPos ->
-            val activeTool = toolConfig.activeTool
-            if (activeTool == ToolType.ERASER) {
-                drawCircle(
-                    color = Color.Red.copy(alpha = 0.6f),
-                    radius = eraserRadiusPx,
-                    center = hoverPos,
-                    style = CanvasStrokeStyle(width = 3f)
+            // 6. Render the eraser square, in canvas space so it scales with zoom exactly
+            // as Rnote's does (Eraser::draw_on_doc). Colours are Rnote's GNOME reds:
+            // fill GNOME_REDS[0] at a=160 when down and a=51 in proximity, outline
+            // GNOME_REDS[2] at a=240, two screen pixels wide at any zoom.
+            eraserCursor?.let { center ->
+                val bounds = EraserHitTest.eraserBounds(center, toolConfig.eraserWidth)
+                val outlineWidth = 2f / viewportState.effectiveScale
+                drawRect(
+                    color = if (eraserCursorDown) ERASER_FILL else ERASER_PROXIMITY_FILL,
+                    topLeft = bounds.topLeft,
+                    size = bounds.size
                 )
-            } else {
-                drawCircle(
-                    color = toolConfig.currentActiveColor,
-                    radius = (toolConfig.currentActiveSize * viewportState.effectiveScale) / 2f,
-                    center = hoverPos
+                val outline = bounds.deflate(outlineWidth * 0.5f)
+                drawRect(
+                    color = ERASER_OUTLINE,
+                    topLeft = outline.topLeft,
+                    size = outline.size,
+                    style = CanvasStrokeStyle(width = outlineWidth)
                 )
             }
+        }
+
+        // 7. Render the brush hover cursor (screen space). The eraser has its own
+        // indicator above, drawn in canvas space because its size is a document size.
+        hoverOffset?.let { hoverPos ->
+            drawCircle(
+                color = toolConfig.currentActiveColor,
+                radius = (toolConfig.currentActiveSize * viewportState.effectiveScale) / 2f,
+                center = hoverPos
+            )
         }
     }
 }
@@ -425,21 +475,30 @@ private fun pressureCurveFor(toolConfig: ToolConfig): PressureCurve = when {
     else -> PressureCurve.LINEAR
 }
 
-private fun eraseStrokesNear(
-    touchPos: Offset,
-    eraserRadiusPx: Float,
+/**
+ * Rnote's `Eraser` colours (GNOME palette reds, see Eraser::draw_on_doc).
+ */
+private val ERASER_OUTLINE = Color(0xE0E01B24)
+private val ERASER_FILL = Color(0xA0F66151)
+private val ERASER_PROXIMITY_FILL = Color(0x33F66151)
+
+/**
+ * Trashes every stroke the eraser square touches, Rnote's default
+ * `EraserStyle::TrashCollidingStrokes`. [onFirstHit] fires before the first removal of a
+ * gesture, so the whole drag collapses into one undo step rather than one per frame.
+ */
+private fun eraseAt(
+    center: Offset,
+    eraserWidth: Float,
     strokes: List<Stroke>,
-    onEraseStrokes: (List<Stroke>) -> Unit
+    onEraseStrokes: (List<Stroke>) -> Unit,
+    onFirstHit: () -> Unit
 ) {
-    val erasedStrokes = strokes.filter { stroke ->
-        val points = stroke.points
-        if (points.isEmpty()) false
-        else {
-            val totalHit = eraserRadiusPx + (stroke.width / 2f)
-            points.any { pt -> hypot(pt.x - touchPos.x, pt.y - touchPos.y) <= totalHit }
-        }
-    }
-    if (erasedStrokes.isNotEmpty()) {
-        onEraseStrokes(erasedStrokes)
+    val bounds = EraserHitTest.eraserBounds(center, eraserWidth)
+    val hit = EraserHitTest.collidingStrokes(bounds, strokes)
+    if (hit.isNotEmpty()) {
+        onFirstHit()
+        onEraseStrokes(hit)
     }
 }
+

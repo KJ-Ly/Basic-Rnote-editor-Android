@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -126,7 +127,10 @@ private fun EraserConfigPage(toolConfig: ToolConfig, onSizeChanged: (Float) -> U
     StripIconToggle(GeneratedIcons.EraserSplit, "Split Strokes (coming soon)", selected = false, implemented = false) {}
     StripDivider()
     val presets = BrushSizePreset.entries.map { it to it.eraserPx }
-    StrokeWidthPicker(toolConfig.currentActiveSize, presets, maxRange = 128f, onSizeChanged)
+    StrokeWidthPicker(
+        toolConfig.currentActiveSize, presets, maxRange = 128f, onSizeChanged,
+        previewStyle = StrokeWidthPreviewStyle.ROUNDED_RECT
+    )
 }
 
 // ── Selector ─────────────────────────────────────────────────────────────
@@ -219,6 +223,17 @@ private fun StripActionButton(
 }
 
 /**
+ * Desktop Rnote's `StrokeWidthPreviewStyle`. The brush pages preview a width as a dot;
+ * `eraserpage.ui` sets `preview-style: rounded-rect`, because Rnote's eraser really is
+ * an axis-aligned square (`EraserConfig::eraser_bounds` is an Aabb), so a round preview
+ * would advertise the wrong shape.
+ */
+private enum class StrokeWidthPreviewStyle(val shape: Shape) {
+    CIRCLE(CircleShape),
+    ROUNDED_RECT(RoundedCornerShape(2.dp))
+}
+
+/**
  * Numeric chip (tap opens a scroll-wheel picker popup) then three size-preset
  * dots below. Earlier iterations tried an always-inline editor — a text field
  * (fiddly to type into on a narrow strip) and drag-to-scrub (worked, but the
@@ -229,7 +244,8 @@ private fun StrokeWidthPicker(
     currentSize: Float,
     presets: List<Pair<BrushSizePreset, Float>>,
     maxRange: Float,
-    onSizeChanged: (Float) -> Unit
+    onSizeChanged: (Float) -> Unit,
+    previewStyle: StrokeWidthPreviewStyle = StrokeWidthPreviewStyle.CIRCLE
 ) {
     var showPicker by remember { mutableStateOf(false) }
 
@@ -272,7 +288,7 @@ private fun StrokeWidthPicker(
             Box(
                 modifier = Modifier
                     .size(dotDiameter)
-                    .clip(CircleShape)
+                    .clip(previewStyle.shape)
                     .background(if (isSelected) BrnaColors.Accent else BrnaColors.TextPrimaryOnPanel)
             )
         }

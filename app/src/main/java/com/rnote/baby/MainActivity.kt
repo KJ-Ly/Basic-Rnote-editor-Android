@@ -328,9 +328,14 @@ class MainActivity : ComponentActivity() {
                                 strokes.add(newStroke)
                                 isModified = true
                             },
-                            onEraseStrokes = { erased ->
+                            onEraseStart = {
+                                // One snapshot for the whole eraser drag. This used to sit
+                                // in onEraseStrokes, which fires per motion event, so
+                                // rubbing out five strokes cost five undos to put back.
                                 undoStack.add(strokes.toList())
                                 redoStack.clear()
+                            },
+                            onEraseStrokes = { erased ->
                                 val erasedIds = erased.map { it.id }.toSet()
                                 strokes.removeAll { it.id in erasedIds }
                                 isModified = true
@@ -346,7 +351,6 @@ class MainActivity : ComponentActivity() {
                                 }
                                 isModified = true
                             },
-                            onUndoRequested = { performUndoAction?.invoke() }
                         )
 
                         // Top-center: stroke color + palette (matches Rnote's colorpicker.ui)
