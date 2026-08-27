@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -21,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropLandscape
 import androidx.compose.material.icons.filled.CropPortrait
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -59,12 +62,20 @@ import com.rnote.baby.model.PaperPattern
 import com.rnote.baby.model.PaperStyle
 import kotlin.math.roundToInt
 
+/**
+ * Below the width breakpoint this is a modal bottom sheet, matching a phone's
+ * one-thing-at-a-time flow. At tablet width [dockedAsSidePanel] docks it as a
+ * persistent side panel instead — matching desktop Rnote's RnSettingsPanel,
+ * which lives in the sidebar rather than a transient overlay.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PageSettingsSheet(
     paperStyle: PaperStyle,
     onPaperStyleChanged: (PaperStyle) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    dockedAsSidePanel: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -78,11 +89,7 @@ fun PageSettingsSheet(
 
     var measureUnit by remember { mutableStateOf(MeasureUnit.PX) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = containerColor
-    ) {
+    val content: @Composable () -> Unit = {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -495,6 +502,46 @@ fun PageSettingsSheet(
                 accent = accent,
                 isDark = isDark
             )
+        }
+    }
+
+    if (dockedAsSidePanel) {
+        Surface(
+            modifier = modifier
+                .fillMaxHeight()
+                .width(360.dp),
+            color = containerColor,
+            tonalElevation = 4.dp,
+            shadowElevation = 8.dp
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 12.dp, top = 20.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Page Settings",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = onSurface)
+                    }
+                }
+                content()
+            }
+        }
+    } else {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState,
+            containerColor = containerColor
+        ) {
+            content()
         }
     }
 }

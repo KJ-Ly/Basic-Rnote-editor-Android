@@ -2,7 +2,6 @@ package com.rnote.baby.export
 
 import androidx.compose.ui.graphics.toArgb
 import com.rnote.baby.model.NoteDocument
-import com.rnote.baby.model.ToolType
 import java.util.Locale
 
 object SvgExporter {
@@ -29,7 +28,7 @@ object SvgExporter {
             val colorHex = String.format(Locale.ROOT, "#%06X", 0xFFFFFF and stroke.color.toArgb())
             val opacity = stroke.alpha
             val strokeWidth = stroke.width
-            val strokeCap = if (stroke.toolType == ToolType.HIGHLIGHTER) "square" else "round"
+            val strokeCap = if (stroke.isHighlighter) "square" else "round"
 
             // Construct SVG path data string from points using smooth Bézier curves
             val pathData = buildSvgPathData(stroke.points)

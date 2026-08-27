@@ -6,7 +6,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import androidx.compose.ui.graphics.toArgb
 import com.rnote.baby.model.NoteDocument
-import com.rnote.baby.model.ToolType
 import java.io.OutputStream
 
 object ImageExporter {
@@ -43,7 +42,7 @@ object ImageExporter {
                 paint.color = stroke.color.toArgb()
                 paint.strokeWidth = stroke.width
                 paint.alpha = (stroke.alpha * 255).toInt()
-                paint.strokeCap = if (stroke.toolType == ToolType.HIGHLIGHTER) Paint.Cap.SQUARE else Paint.Cap.ROUND
+                paint.strokeCap = if (stroke.isHighlighter) Paint.Cap.SQUARE else Paint.Cap.ROUND
 
                 val path = Path()
                 path.moveTo(stroke.points[0].x, stroke.points[0].y)

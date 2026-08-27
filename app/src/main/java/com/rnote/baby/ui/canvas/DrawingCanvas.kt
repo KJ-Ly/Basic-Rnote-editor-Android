@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke as CanvasStrokeStyle
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalDensity
+import com.rnote.baby.model.BrushStyle
 import com.rnote.baby.model.InkPoint
 import com.rnote.baby.model.PaperStyle
 import com.rnote.baby.model.Stroke
@@ -44,6 +45,7 @@ fun DrawingCanvas(
     onViewportChanged: (ViewportState) -> Unit,
     onAddStroke: (Stroke) -> Unit,
     onEraseStrokes: (List<Stroke>) -> Unit,
+    onSelectionDragStart: () -> Unit = {},
     onStrokesModified: (List<Stroke>) -> Unit,
     onUndoRequested: () -> Unit,
     modifier: Modifier = Modifier
@@ -57,6 +59,10 @@ fun DrawingCanvas(
     var hoverOffset by remember { mutableStateOf<Offset?>(null) }
     var isMovingSelection by remember { mutableStateOf(false) }
     var selectionDragStart by remember { mutableStateOf(Offset.Zero) }
+    // Ensures exactly one undo snapshot is taken per selection drag, on first
+    // actual movement — not one per ACTION_MOVE frame, and not on a drag that
+    // starts but never moves.
+    var selectionMoveSnapshotTaken by remember { mutableStateOf(false) }
     // Edge-trigger: tracks whether the side button was already down so undo
     // fires exactly once per press, not repeatedly while the button is held.
     var sideButtonWasDown by remember { mutableStateOf(false) }
@@ -207,13 +213,14 @@ fun DrawingCanvas(
                         isDrawing = true
 
                         val boundingBox = SelectionManager.calculateBoundingBox(selectedStrokes)
-                        if (activeTool == ToolType.SELECT && boundingBox != null) {
+                        if (activeTool == ToolType.SELECTOR && boundingBox != null) {
                             val screenBoundingBox = Rect(
                                 viewportState.canvasToScreen(boundingBox.topLeft),
                                 viewportState.canvasToScreen(boundingBox.bottomRight)
                             )
                             if (screenBoundingBox.contains(Offset(screenX, screenY))) {
                                 isMovingSelection = true
+                                selectionMoveSnapshotTaken = false
                                 selectionDragStart = Offset(x, y)
                                 return@pointerInteropFilter true
                             } else {
@@ -235,12 +242,16 @@ fun DrawingCanvas(
                     MotionEvent.ACTION_MOVE -> {
                         if (isDrawing) {
                             if (isMovingSelection && selectedStrokes.isNotEmpty()) {
+                                if (!selectionMoveSnapshotTaken) {
+                                    onSelectionDragStart()
+                                    selectionMoveSnapshotTaken = true
+                                }
                                 val delta = Offset(x, y) - selectionDragStart
                                 selectionDragStart = Offset(x, y)
                                 val updated = SelectionManager.translateStrokes(selectedStrokes, delta)
                                 selectedStrokes.clear()
                                 selectedStrokes.addAll(updated)
-                                onStrokesModified(strokes)
+                                onStrokesModified(updated)
                                 return@pointerInteropFilter true
                             }
 
@@ -258,23 +269,15 @@ fun DrawingCanvas(
                         if (isMovingSelection) {
                             isMovingSelection = false
                         } else if (isDrawing) {
-                            if (activeTool == ToolType.SELECT && lassoPoints.size >= 3) {
+                            if (activeTool == ToolType.SELECTOR && lassoPoints.size >= 3) {
                                 val found = SelectionManager.findStrokesInLasso(lassoPoints, strokes)
                                 selectedStrokes.clear()
                                 selectedStrokes.addAll(found)
-                            } else if (activeTool != ToolType.ERASER && activeTool != ToolType.SELECT && currentPoints.isNotEmpty()) {
-                                val strokeColor = if (activeTool == ToolType.HIGHLIGHTER) {
-                                    toolConfig.highlighterColor
-                                } else {
-                                    toolConfig.penColor
-                                }
+                            } else if (activeTool == ToolType.BRUSH && currentPoints.isNotEmpty()) {
+                                val isMarker = toolConfig.brushStyle == BrushStyle.MARKER
 
                                 val avgPressure = currentPoints.map { it.pressure }.average().toFloat()
-                                val baseWidth = if (activeTool == ToolType.HIGHLIGHTER) {
-                                    toolConfig.highlighterWidth
-                                } else {
-                                    toolConfig.strokeWidth
-                                }
+                                val baseWidth = toolConfig.currentActiveSize
 
                                 val finalWidth = if (toolConfig.isPressureSensitive && isStylus) {
                                     baseWidth * (0.35f + 1.15f * avgPressure)
@@ -285,11 +288,11 @@ fun DrawingCanvas(
                                 onAddStroke(
                                     Stroke(
                                         points = currentPoints.toList(),
-                                        color = strokeColor,
+                                        color = toolConfig.currentActiveColor,
                                         strokeWidth = finalWidth,
                                         toolType = activeTool,
-                                        isHighlighter = activeTool == ToolType.HIGHLIGHTER,
-                                        alpha = if (activeTool == ToolType.HIGHLIGHTER) 0.35f else 1.0f
+                                        isHighlighter = isMarker,
+                                        alpha = if (isMarker) 0.35f else 1.0f
                                     )
                                 )
                             }
@@ -320,7 +323,7 @@ fun DrawingCanvas(
             // 2. Render existing strokes
             strokes.forEach { stroke ->
                 val path = InkSmoother.createSmoothPath(stroke.points)
-                val strokeCap = if (stroke.toolType == ToolType.HIGHLIGHTER) StrokeCap.Square else StrokeCap.Round
+                val strokeCap = if (stroke.isHighlighter) StrokeCap.Square else StrokeCap.Round
 
                 drawPath(
                     path = path,
@@ -336,13 +339,14 @@ fun DrawingCanvas(
 
             // 3. Render active stroke preview
             val activeTool = toolConfig.activeTool
-            if (isDrawing && currentPoints.isNotEmpty() && activeTool != ToolType.ERASER && activeTool != ToolType.SELECT) {
+            if (isDrawing && currentPoints.isNotEmpty() && activeTool == ToolType.BRUSH) {
+                val isMarker = toolConfig.brushStyle == BrushStyle.MARKER
                 val path = InkSmoother.createSmoothPath(currentPoints)
-                val color = if (activeTool == ToolType.HIGHLIGHTER) toolConfig.highlighterColor else toolConfig.penColor
+                val color = toolConfig.currentActiveColor
                 val lastPressure = currentPoints.last().pressure
-                val baseWidth = if (activeTool == ToolType.HIGHLIGHTER) toolConfig.highlighterWidth else toolConfig.strokeWidth
+                val baseWidth = toolConfig.currentActiveSize
                 val previewWidth = if (toolConfig.isPressureSensitive) baseWidth * (0.35f + 1.15f * lastPressure) else baseWidth
-                val alpha = if (activeTool == ToolType.HIGHLIGHTER) 0.35f else 1.0f
+                val alpha = if (isMarker) 0.35f else 1.0f
 
                 drawPath(
                     path = path,
@@ -357,7 +361,7 @@ fun DrawingCanvas(
             }
 
             // 4. Render lasso polygon preview
-            if (isDrawing && activeTool == ToolType.SELECT && lassoPoints.size >= 2) {
+            if (isDrawing && activeTool == ToolType.SELECTOR && lassoPoints.size >= 2) {
                 val lassoPath = Path()
                 lassoPath.moveTo(lassoPoints[0].x, lassoPoints[0].y)
                 for (i in 1 until lassoPoints.size) {
@@ -401,10 +405,9 @@ fun DrawingCanvas(
                     style = CanvasStrokeStyle(width = 3f)
                 )
             } else {
-                val cursorColor = if (activeTool == ToolType.HIGHLIGHTER) toolConfig.highlighterColor else toolConfig.penColor
                 drawCircle(
-                    color = cursorColor,
-                    radius = (toolConfig.strokeWidth * viewportState.zoomScale) / 2f,
+                    color = toolConfig.currentActiveColor,
+                    radius = (toolConfig.currentActiveSize * viewportState.zoomScale) / 2f,
                     center = hoverPos
                 )
             }

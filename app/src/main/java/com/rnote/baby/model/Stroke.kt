@@ -10,7 +10,7 @@ data class Stroke(
     val points: List<StrokePoint>,
     val color: Color,
     val strokeWidth: Float = 3f,
-    val toolType: ToolType = ToolType.PEN,
+    val toolType: ToolType = ToolType.BRUSH,
     val isHighlighter: Boolean = false,
     val alpha: Float = 1.0f
 ) {

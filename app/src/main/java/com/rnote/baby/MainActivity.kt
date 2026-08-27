@@ -24,9 +24,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.rnote.baby.model.BrushStyle
+import com.rnote.baby.model.NativeCanvasElement
 import com.rnote.baby.model.NoteDocument
-import com.rnote.baby.model.PaperPattern
 import com.rnote.baby.model.Stroke
+import com.rnote.baby.model.StrokePoint
 import com.rnote.baby.model.ToolConfig
 import com.rnote.baby.model.ToolType
 import com.rnote.baby.model.ViewportState
@@ -34,9 +36,10 @@ import com.rnote.baby.storage.FileManager
 import com.rnote.baby.storage.SettingsManager
 import kotlin.math.floor
 import com.rnote.baby.ui.canvas.DrawingCanvas
-import com.rnote.baby.ui.components.ColorPickerSheet
-import com.rnote.baby.ui.components.FloatingToolBar
+import com.rnote.baby.ui.components.ColorPicker
 import com.rnote.baby.ui.components.PageSettingsSheet
+import com.rnote.baby.ui.components.PenConfigStrip
+import com.rnote.baby.ui.components.PenPicker
 import com.rnote.baby.ui.components.RnoteTopBar
 import com.rnote.baby.ui.theme.BabyRnoteTheme
 
@@ -130,6 +133,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            // Rnote's own breakpoint collapses its sidebar under 1250sp on a desktop window;
+            // here, below Material's compact/medium 600dp boundary, the floating PenConfigStrip
+            // would overlap most of the drawing area on a phone-width screen, so it's hidden
+            // rather than degraded in place, and Page Settings falls back to a modal sheet
+            // instead of a docked side panel.
+            val isCompactWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
+
             // ── Persistent settings — loaded once from SharedPreferences ──────────
             var paperStyle by remember {
                 mutableStateOf(SettingsManager.loadPaperStyle(this))
@@ -146,7 +156,6 @@ class MainActivity : ComponentActivity() {
 
             // ── UI sheet state ────────────────────────────────────────────────────
             var viewportState by remember { mutableStateOf(ViewportState()) }
-            var showColorPicker by remember { mutableStateOf(false) }
             var showPageSettings by remember { mutableStateOf(false) }
 
             // ── Stroke stacks ─────────────────────────────────────────────────────
@@ -154,6 +163,9 @@ class MainActivity : ComponentActivity() {
             val undoStack = remember { mutableStateListOf<List<Stroke>>() }
             val redoStack = remember { mutableStateListOf<List<Stroke>>() }
             val selectedStrokes = remember { mutableStateListOf<Stroke>() }
+            // Non-stroke elements (text/shapes/images) preserved from an imported native file.
+            // Carried through save/export so they aren't silently dropped from opened .rnote files.
+            var documentNativeElements by remember { mutableStateOf<List<NativeCanvasElement>>(emptyList()) }
 
             // ── Page indicator (2D grid position) ────────────────────────────────
             val currentPage: Int? = if (paperStyle.pageSize.isInfinite) null else {
@@ -182,6 +194,7 @@ class MainActivity : ComponentActivity() {
                 strokes.addAll(doc.strokes)
                 paperStyle = doc.paperStyle
                 documentTitle = doc.title
+                documentNativeElements = doc.nativeElements
                 viewportState = ViewportState()
                 isModified = false
                 // Flag that this was opened from a .rnote file so Save goes back to .rnote
@@ -193,15 +206,13 @@ class MainActivity : ComponentActivity() {
 
             // ── S-Pen Air Action remote shortcuts ─────────────────────────────────
             performUndoAction = {
-                if (strokes.isNotEmpty()) {
+                // Gated on undoStack, not `strokes` — an empty canvas can still have undo
+                // history (e.g. right after Clear Canvas), and that must stay undoable.
+                if (undoStack.isNotEmpty()) {
                     redoStack.add(strokes.toList())
-                    if (undoStack.isNotEmpty()) {
-                        val previousState = undoStack.removeAt(undoStack.lastIndex)
-                        strokes.clear()
-                        strokes.addAll(previousState)
-                    } else {
-                        strokes.clear()
-                    }
+                    val previousState = undoStack.removeAt(undoStack.lastIndex)
+                    strokes.clear()
+                    strokes.addAll(previousState)
                     isModified = true
                 }
             }
@@ -223,13 +234,9 @@ class MainActivity : ComponentActivity() {
                             paperStyle = paperStyle,
                             zoomScale = viewportState.zoomScale,
                             allowFingerDrawing = toolConfig.allowFingerDrawing,
-                            canUndo = strokes.isNotEmpty(),
-                            canRedo = redoStack.isNotEmpty(),
                             isModified = isModified,
                             documentTitle = documentTitle,
                             currentPage = pageGridLabel,
-                            onUndo = { performUndoAction?.invoke() },
-                            onRedo = { performRedoAction?.invoke() },
                             onResetZoom = { viewportState = ViewportState() },
                             onTitleTap = {
                                 renameFieldValue = documentTitle
@@ -243,7 +250,8 @@ class MainActivity : ComponentActivity() {
                                 val currentDoc = NoteDocument(
                                     title = documentTitle,
                                     paperStyle = paperStyle,
-                                    strokes = strokes.toList()
+                                    strokes = strokes.toList(),
+                                    nativeElements = documentNativeElements
                                 )
                                 pendingDocumentToSave = currentDoc
                                 if (saveAsRnote) {
@@ -260,7 +268,8 @@ class MainActivity : ComponentActivity() {
                                 val currentDoc = NoteDocument(
                                     title = documentTitle,
                                     paperStyle = paperStyle,
-                                    strokes = strokes.toList()
+                                    strokes = strokes.toList(),
+                                    nativeElements = documentNativeElements
                                 )
                                 pendingDocumentToExport = currentDoc
                                 exportSvgLauncher.launch("$safeTitle.svg")
@@ -270,38 +279,23 @@ class MainActivity : ComponentActivity() {
                                 val currentDoc = NoteDocument(
                                     title = documentTitle,
                                     paperStyle = paperStyle,
-                                    strokes = strokes.toList()
+                                    strokes = strokes.toList(),
+                                    nativeElements = documentNativeElements
                                 )
                                 pendingDocumentToExport = currentDoc
                                 exportPngLauncher.launch("$safeTitle.png")
                             },
                             onClearCanvas = {
-                                if (strokes.isNotEmpty()) {
+                                if (strokes.isNotEmpty() || documentNativeElements.isNotEmpty()) {
                                     undoStack.add(strokes.toList())
                                     redoStack.clear()
                                     strokes.clear()
                                     selectedStrokes.clear()
+                                    documentNativeElements = emptyList()
                                     isModified = true
                                 }
                             },
-                            onOpenPageSettings = { showPageSettings = true },
-                            onToggleLandscape = {
-                                paperStyle = paperStyle.copy(isLandscape = !paperStyle.isLandscape)
-                            },
-                            onTogglePaperPattern = {
-                                val nextPattern = when (paperStyle.pattern) {
-                                    PaperPattern.DOTS  -> PaperPattern.GRID
-                                    PaperPattern.GRID  -> PaperPattern.LINES
-                                    PaperPattern.LINES -> PaperPattern.ISO_GRID
-                                    PaperPattern.ISO_GRID -> PaperPattern.ISO_DOTS
-                                    PaperPattern.ISO_DOTS -> PaperPattern.BLANK
-                                    PaperPattern.BLANK -> PaperPattern.DOTS
-                                }
-                                paperStyle = paperStyle.copy(pattern = nextPattern)
-                            },
-                            onToggleTheme = {
-                                paperStyle = paperStyle.copy(isDarkMode = !paperStyle.isDarkMode)
-                            }
+                            onOpenPageSettings = { showPageSettings = true }
                         )
                     }
                 ) { innerPadding ->
@@ -332,29 +326,42 @@ class MainActivity : ComponentActivity() {
                                 strokes.removeAll { it.id in erasedIds }
                                 isModified = true
                             },
-                            onStrokesModified = {
+                            onSelectionDragStart = {
                                 undoStack.add(strokes.toList())
                                 redoStack.clear()
+                            },
+                            onStrokesModified = { updatedStrokes ->
+                                val updatedById = updatedStrokes.associateBy { it.id }
+                                for (i in strokes.indices) {
+                                    updatedById[strokes[i].id]?.let { strokes[i] = it }
+                                }
                                 isModified = true
                             },
                             onUndoRequested = { performUndoAction?.invoke() }
                         )
 
-                        // Floating toolbar
-                        FloatingToolBar(
-                            toolConfig = toolConfig,
-                            onToolSelected = { newTool ->
-                                toolConfig = toolConfig.copy(activeTool = newTool)
-                                if (newTool != ToolType.SELECT) selectedStrokes.clear()
-                            },
+                        // Top-center: stroke color + palette (matches Rnote's colorpicker.ui)
+                        ColorPicker(
+                            activeColor = toolConfig.currentActiveColor,
                             onColorSelected = { newColor ->
-                                toolConfig = toolConfig.copy(penColor = newColor)
+                                toolConfig = if (toolConfig.activeTool == ToolType.BRUSH && toolConfig.brushStyle == BrushStyle.MARKER) {
+                                    toolConfig.copy(highlighterColor = newColor)
+                                } else {
+                                    toolConfig.copy(penColor = newColor)
+                                }
                             },
-                            onOpenColorPicker = { showColorPicker = true },
-                            onSizeChanged = { newSize ->
-                                toolConfig = toolConfig.updateActiveSize(newSize)
-                            },
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 18.dp)
+                        )
+
+                        // Left edge, vertically centered: per-pen config (matches RnPensSideBar).
+                        // Hidden below the width breakpoint (see isCompactWidth, top of file).
+                        if (!isCompactWidth) PenConfigStrip(
+                            toolConfig = toolConfig,
                             hasActiveSelection = selectedStrokes.isNotEmpty(),
+                            onBrushStyleSelected = { style -> toolConfig = toolConfig.copy(brushStyle = style) },
+                            onSizeChanged = { newSize -> toolConfig = toolConfig.updateActiveSize(newSize) },
                             onDeleteSelection = {
                                 if (selectedStrokes.isNotEmpty()) {
                                     undoStack.add(strokes.toList())
@@ -365,29 +372,60 @@ class MainActivity : ComponentActivity() {
                                     isModified = true
                                 }
                             },
+                            onDuplicateSelection = {
+                                if (selectedStrokes.isNotEmpty()) {
+                                    undoStack.add(strokes.toList())
+                                    redoStack.clear()
+                                    val offset = 20f
+                                    val duplicates = selectedStrokes.map { s ->
+                                        s.copy(
+                                            id = java.util.UUID.randomUUID().toString(),
+                                            points = s.points.map { p -> StrokePoint(p.x + offset, p.y + offset, p.pressure) }
+                                        )
+                                    }
+                                    strokes.addAll(duplicates)
+                                    selectedStrokes.clear()
+                                    selectedStrokes.addAll(duplicates)
+                                    isModified = true
+                                }
+                            },
+                            onSelectAll = {
+                                selectedStrokes.clear()
+                                selectedStrokes.addAll(strokes)
+                            },
+                            onDeselectAll = { selectedStrokes.clear() },
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .padding(start = 18.dp)
+                        )
+
+                        // Bottom-center: pen switcher + undo/redo (matches Rnote's penpicker.ui)
+                        PenPicker(
+                            toolConfig = toolConfig,
+                            canUndo = undoStack.isNotEmpty(),
+                            canRedo = redoStack.isNotEmpty(),
+                            onToolSelected = { newTool ->
+                                toolConfig = toolConfig.copy(activeTool = newTool)
+                                if (newTool != ToolType.SELECTOR) selectedStrokes.clear()
+                            },
+                            onUndo = { performUndoAction?.invoke() },
+                            onRedo = { performRedoAction?.invoke() },
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .padding(bottom = 28.dp)
                         )
-                    }
 
-                    // ── Color Picker Sheet ────────────────────────────────────────
-                    if (showColorPicker) {
-                        ColorPickerSheet(
-                            toolConfig = toolConfig,
-                            onColorSelected = { toolConfig = toolConfig.copy(penColor = it) },
-                            onStrokeWidthChanged = { toolConfig = toolConfig.updateActiveSize(it) },
-                            onDismiss = { showColorPicker = false }
-                        )
-                    }
-
-                    // ── Page Settings Sheet ───────────────────────────────────────
-                    if (showPageSettings) {
-                        PageSettingsSheet(
-                            paperStyle = paperStyle,
-                            onPaperStyleChanged = { paperStyle = it },
-                            onDismiss = { showPageSettings = false }
-                        )
+                        // Docked at tablet width (right edge, opposite PenConfigStrip); falls
+                        // back to a modal sheet below the breakpoint.
+                        if (showPageSettings) {
+                            PageSettingsSheet(
+                                paperStyle = paperStyle,
+                                onPaperStyleChanged = { paperStyle = it },
+                                onDismiss = { showPageSettings = false },
+                                dockedAsSidePanel = !isCompactWidth,
+                                modifier = Modifier.align(Alignment.CenterEnd)
+                            )
+                        }
                     }
 
                     // ── Rename Dialog ─────────────────────────────────────────────

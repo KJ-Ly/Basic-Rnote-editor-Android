@@ -103,11 +103,17 @@ object DocumentSerializer {
                 val strokeId = strokeObj.optString("id", "")
                 val colorInt = strokeObj.optInt("color", Color.White.toArgb())
                 val width = strokeObj.optDouble("width", 6.0).toFloat()
-                val toolTypeName = strokeObj.optString("toolType", ToolType.PEN.name)
-                val toolType = try {
-                    ToolType.valueOf(toolTypeName)
-                } catch (e: Exception) {
-                    ToolType.PEN
+                val toolTypeName = strokeObj.optString("toolType", ToolType.BRUSH.name)
+                // "PEN"/"HIGHLIGHTER"/"SELECT" are pre-redesign names from previously saved .json
+                // files; map them to their current equivalents rather than failing to parse.
+                val toolType = when (toolTypeName) {
+                    "PEN", "HIGHLIGHTER" -> ToolType.BRUSH
+                    "SELECT" -> ToolType.SELECTOR
+                    else -> try {
+                        ToolType.valueOf(toolTypeName)
+                    } catch (e: Exception) {
+                        ToolType.BRUSH
+                    }
                 }
                 val alpha = strokeObj.optDouble("alpha", 1.0).toFloat()
 

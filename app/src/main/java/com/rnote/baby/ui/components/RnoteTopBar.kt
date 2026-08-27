@@ -2,20 +2,13 @@ package com.rnote.baby.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.IosShare
-import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Redo
-import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -34,23 +27,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rnote.baby.model.PaperStyle
+import com.rnote.baby.ui.theme.BrnaColors
 
+/**
+ * Trimmed to match desktop Rnote's headerbar: title + Page Settings + overflow
+ * (Open/Save/Export/Clear) only. Undo/redo live in [PenPicker] now (Rnote made
+ * the same move in v0.7.0 — bottom-center is thumb-reachable, top-right isn't).
+ * Pattern cycling, theme, and landscape are already controllable from Page
+ * Settings, so the duplicate quick-toggles that used to live here were removed
+ * rather than kept as a second path to the same state.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RnoteTopBar(
     paperStyle: PaperStyle,
     zoomScale: Float,
     allowFingerDrawing: Boolean,
-    canUndo: Boolean,
-    canRedo: Boolean,
     isModified: Boolean,
     documentTitle: String,
     currentPage: String?,          // null in infinite mode; "col, row" in paged mode
-    onUndo: () -> Unit,
-    onRedo: () -> Unit,
     onResetZoom: () -> Unit,
     onTitleTap: () -> Unit,
     onToggleFingerDrawing: () -> Unit,
@@ -59,10 +56,7 @@ fun RnoteTopBar(
     onExportSvg: () -> Unit,
     onExportPng: () -> Unit,
     onClearCanvas: () -> Unit,
-    onOpenPageSettings: () -> Unit,
-    onToggleLandscape: () -> Unit,
-    onTogglePaperPattern: () -> Unit,
-    onToggleTheme: () -> Unit
+    onOpenPageSettings: () -> Unit
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     val iconTint = if (paperStyle.isDarkMode) Color.White else Color(0xFF1E1E24)
@@ -84,7 +78,7 @@ fun RnoteTopBar(
                         Text(
                             text = " •",
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF82AAFF),
+                            color = BrnaColors.Accent,
                             fontSize = 18.sp
                         )
                     }
@@ -94,7 +88,7 @@ fun RnoteTopBar(
                 Text(
                     text = "  ${(zoomScale * 100).toInt()}%",
                     fontSize = 12.sp,
-                    color = if (zoomScale != 1f) Color(0xFF82AAFF) else Color.Gray,
+                    color = if (zoomScale != 1f) BrnaColors.Accent else Color.Gray,
                     modifier = Modifier.clickable { onResetZoom() }
                 )
 
@@ -109,25 +103,9 @@ fun RnoteTopBar(
             }
         },
         actions = {
-            // Undo
-            IconButton(onClick = onUndo, enabled = canUndo) {
-                Icon(
-                    imageVector = Icons.Default.Undo,
-                    contentDescription = "Undo",
-                    tint = if (canUndo) iconTint else Color.Gray
-                )
-            }
-
-            // Redo
-            IconButton(onClick = onRedo, enabled = canRedo) {
-                Icon(
-                    imageVector = Icons.Default.Redo,
-                    contentDescription = "Redo",
-                    tint = if (canRedo) iconTint else Color.Gray
-                )
-            }
-
-            // Finger drawing toggle
+            // Finger drawing toggle — an input-mode setting, not a page/document
+            // property, so it doesn't have a home in Page Settings the way
+            // pattern/theme/orientation do.
             IconButton(onClick = onToggleFingerDrawing) {
                 Icon(
                     imageVector = Icons.Default.TouchApp,
@@ -139,31 +117,6 @@ fun RnoteTopBar(
             // Page settings
             IconButton(onClick = onOpenPageSettings) {
                 Icon(Icons.Default.Article, contentDescription = "Page Settings", tint = iconTint)
-            }
-
-            // Landscape toggle (only in paged mode)
-            if (!paperStyle.pageSize.isInfinite) {
-                IconButton(onClick = onToggleLandscape) {
-                    Icon(
-                        imageVector = Icons.Default.ScreenRotation,
-                        contentDescription = if (paperStyle.isLandscape) "Switch to Portrait" else "Switch to Landscape",
-                        tint = if (paperStyle.isLandscape) Color(0xFF82AAFF) else iconTint
-                    )
-                }
-            }
-
-            // Paper pattern cycle
-            IconButton(onClick = onTogglePaperPattern) {
-                Icon(Icons.Default.GridOn, contentDescription = "Change Paper Pattern", tint = iconTint)
-            }
-
-            // Dark / light mode
-            IconButton(onClick = onToggleTheme) {
-                Icon(
-                    imageVector = if (paperStyle.isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                    contentDescription = "Toggle Theme",
-                    tint = if (paperStyle.isDarkMode) Color.Yellow else Color(0xFF1E1E24)
-                )
             }
 
             // ⋮ Overflow — Save, Open, Export, Clear
@@ -197,8 +150,8 @@ fun RnoteTopBar(
                     )
                     HorizontalDivider()
                     DropdownMenuItem(
-                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color(0xFFF07178)) },
-                        text = { Text("Clear Canvas", color = Color(0xFFF07178)) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = BrnaColors.DestructiveTint) },
+                        text = { Text("Clear Canvas", color = BrnaColors.DestructiveTint) },
                         onClick = { showOverflowMenu = false; onClearCanvas() }
                     )
                 }
