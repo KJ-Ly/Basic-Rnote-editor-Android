@@ -168,7 +168,12 @@ These are features present in desktop Rnote that haven't been ported yet:
 
 ## Build & Run
 
-```bash
+**Neither the JDK nor adb is on `PATH`** — both need absolute paths. Assuming
+otherwise is what makes `gradlew` die with "JAVA_HOME is not set and no 'java'
+command could be found" and `adb` with "command not found"; neither error means
+the tool is missing.
+
+```powershell
 # Set JAVA_HOME to Android Studio's bundled JBR
 $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 
@@ -181,6 +186,39 @@ $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 # Install to connected device
 .\gradlew.bat installDebug
 ```
+
+### Driving the app on-device
+
+The connected tablet (serial `R52N90MG5RZ`, an SM-T870) can be navigated
+directly from a shell — no emulator needed. An earlier session recorded that
+"adb/emulator isn't available in this environment" and handed all on-device
+verification back to the user; that was wrong, and only true of bare `adb`
+with no path.
+
+```powershell
+$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+
+& $adb devices        # want "device" — "offline"/"unauthorized" won't accept input
+& $adb -s R52N90MG5RZ shell am start -n com.rnote.baby/.MainActivity
+& $adb -s R52N90MG5RZ shell input tap <x> <y>
+
+# Screenshot. From bash this is one step (verified working):
+#   adb -s R52N90MG5RZ exec-out screencap -p > shot.png
+# Do NOT use that redirect in PowerShell — it re-encodes the binary stream as
+# text and corrupts the PNG. Capture on-device and pull instead (verified):
+& $adb -s R52N90MG5RZ shell screencap -p /sdcard/shot.png
+& $adb -s R52N90MG5RZ pull /sdcard/shot.png .
+```
+
+Read the screenshot, locate the next target, tap, repeat. Caveats:
+
+- `installDebug` silently skips offline devices — the emulator entry usually is
+  one, so check `adb devices` before blaming the build.
+- Taps are raw screen coordinates read off a screenshot, so any layout change
+  invalidates them, and a mis-tap hits whatever is actually there in a real
+  document.
+- This only verifies what *renders*. Stylus pressure, tilt, and palm rejection
+  still need a hand on the device.
 
 **Min SDK**: Check `app/build.gradle.kts` for `minSdk` value.
 **Target**: Jetpack Compose with Material3.
@@ -195,6 +233,13 @@ $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 ---
 
 ## Recent Changes (August 2026)
+
+- **Canvas is now density-aware, and the dot pattern scales with zoom** — two separate bugs found by measuring BRNA and desktop Rnote screenshots pixel-by-pixel rather than by eye:
+  - `PaperBackgroundRenderer` drew each dot as a **fixed 1.6px-radius circle in screen space** while the spacing scaled with zoom, so the further you zoomed the more the dots fell behind — at 500% the measured dot/spacing ratio was 0.025 against desktop's 0.047. Desktop Rnote (`rnote-engine/src/document/background.rs`) uses `DOTS_WIDTH = 1.5` canvas units drawn as a **rounded square** (corner radius width/3) in *document* space, on a `PATTERN_SIZE_DEFAULT = 32.0` grid. Now matched: measured ratio 0.0471 vs desktop's 0.0473.
+  - The same screen-space bug affected every other pattern and was fixed with it: ruled, grid and isometric-grid lines were flat `1f`/`0.8f` widths and now use Rnote's `LINE_WIDTH = 0.5` canvas px scaled by zoom. Rnote's isometric **dots** are also not round — `gen_iso_dots_pattern()` draws small hexagons of `HEXAGON_HEIGHT = 2.0`, so `drawIsoDotHexagon()` replaces the circle there. (The hexagon's vertex order is ours; Rnote's `QUARTER_SQRT_THREE`/`HALF_SQRT_THREE` figures are the half-width and width of exactly this pointy-top hexagon.) All five patterns measured on-device against expectation: DOTS/GRID/LINES spacing 91.7px vs 91.5 predicted, line width ~1.43px, ISO_DOTS hexagon 6.0px and row spacing 79.4px vs 79.3 predicted.
+  - More fundamentally, the canvas mapped **1 canvas unit → 1 device px**, ignoring display density entirely (`density` was used only for the eraser's touch radius). Canvas units are defined at `CANVAS_DPI = 96`, so on a 275 dpi tablet panel "100%" rendered a document ~2.9x physically smaller than the same document on a 96 dpi desktop — dots 0.70" apart against desktop's 1.98" at the *same* percentage. `ViewportState` now carries a `displayScale` (real panel dpi ÷ `CANVAS_DPI`, from `xdpi`/`ydpi` with a sanity check against the density bucket) and exposes `effectiveScale = zoomScale * displayScale`. **Every screen↔canvas conversion and every screen-space size derived from a canvas-space one must use `effectiveScale`; `zoomScale` is only the number shown to the user.**
+  - Because a zoom figure is now device-independent, desktop's `Camera::ZOOM_MIN`/`ZOOM_MAX` (0.2 / 6.0) are used **verbatim**, replacing the old `0.25f..5.0f` clamp. An earlier attempt scaled `ZOOM_MAX` per-device instead (`6.0 * dpi/96` ≈ 21.25 here) — that was a patch over the missing display scale and was dropped in favour of fixing the base.
+  - Visible consequence: existing documents render ~2.9x larger at 100% on a tablet than they did before, with stroke widths and page boundaries scaling to match. This is correct — it's what desktop shows — and saved `.rnote` files are untouched, since all of this is a view transform only.
 
 - **Wheel picker uses a tiered step size** instead of one flat step for the whole range — `tieredStrokeSizeValues()` in `PenConfigStrip.kt`: 0.1 up to 12, 0.5 up to 50, 1 up to 100, 2 up to 128 (each tier capped at the tool's actual `maxRange` if smaller, e.g. the brush's Solid style tops out at 64). Fine control where it matters (small strokes), without a 1280-row wheel to scroll through for large ones.
 - **Stroke size picker rebuilt again as a scroll-wheel popup**, replacing the inline drag-to-scrub spin button (user preferred a scrollable popup after all — see the two entries below for the earlier attempts). `PenConfigStrip`'s numeric chip now opens a `Dialog` containing `WheelNumberPicker`: a `LazyColumn` of values behind a fixed center highlight band, live-reporting whichever value is centered as you scroll (via `derivedStateOf` over `LazyListState.layoutInfo`, comparing each visible item's screen-space center to the viewport's), and animating to rest exactly centered once scrolling stops rather than depending on a snap-fling API that may not be present in this Compose Foundation version. Tapping any row also selects it directly and scrolls it to center.
