@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.rnote.baby.model.BrushStyle
 import com.rnote.baby.model.NativeCanvasElement
@@ -155,7 +156,15 @@ class MainActivity : ComponentActivity() {
             var renameFieldValue by remember { mutableStateOf("") }
 
             // ── UI sheet state ────────────────────────────────────────────────────
-            var viewportState by remember { mutableStateOf(ViewportState()) }
+            // One canvas unit must be a constant physical size, so the viewport carries the
+            // display's real scale (see ViewportState.displayScale) rather than drawing 1:1.
+            val displayMetrics = LocalContext.current.resources.displayMetrics
+            val displayScale = remember(displayMetrics) {
+                ViewportState.displayScaleFor(
+                    displayMetrics.xdpi, displayMetrics.ydpi, displayMetrics.densityDpi
+                )
+            }
+            var viewportState by remember { mutableStateOf(ViewportState(displayScale = displayScale)) }
             var showPageSettings by remember { mutableStateOf(false) }
 
             // ── Stroke stacks ─────────────────────────────────────────────────────
@@ -175,8 +184,8 @@ class MainActivity : ComponentActivity() {
             val pageGridLabel: String? = if (paperStyle.pageSize.isInfinite) null else {
                 val pageW = paperStyle.effectivePageWidthPx
                 val pageH = paperStyle.effectivePageHeightPx
-                val col = floor(-viewportState.panOffset.x / viewportState.zoomScale / (pageW + 40f)).toInt()
-                val row = floor(-viewportState.panOffset.y / viewportState.zoomScale / (pageH + 40f)).toInt()
+                val col = floor(-viewportState.panOffset.x / viewportState.effectiveScale / (pageW + 40f)).toInt()
+                val row = floor(-viewportState.panOffset.y / viewportState.effectiveScale / (pageH + 40f)).toInt()
                 "${col + 1}, ${row + 1}"  // 1-indexed display
             }
 
@@ -195,7 +204,7 @@ class MainActivity : ComponentActivity() {
                 paperStyle = doc.paperStyle
                 documentTitle = doc.title
                 documentNativeElements = doc.nativeElements
-                viewportState = ViewportState()
+                viewportState = ViewportState(displayScale = displayScale)
                 isModified = false
                 // Flag that this was opened from a .rnote file so Save goes back to .rnote
                 saveAsRnote = doc.nativeElements.isNotEmpty() || doc.title == "Imported Note"
@@ -237,7 +246,7 @@ class MainActivity : ComponentActivity() {
                             isModified = isModified,
                             documentTitle = documentTitle,
                             currentPage = pageGridLabel,
-                            onResetZoom = { viewportState = ViewportState() },
+                            onResetZoom = { viewportState = ViewportState(displayScale = displayScale) },
                             onTitleTap = {
                                 renameFieldValue = documentTitle
                                 showRenameDialog = true

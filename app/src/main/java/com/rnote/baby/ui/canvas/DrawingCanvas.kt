@@ -115,7 +115,8 @@ fun DrawingCanvas(
                                 val panDelta = midpoint - lastPinchMidpoint
                                 // Zoom delta (ratio of current spread to previous spread)
                                 val zoomDelta = if (lastPinchDistance > 0f) distance / lastPinchDistance else 1f
-                                val newZoom = (viewportState.zoomScale * zoomDelta).coerceIn(0.25f, 5.0f)
+                                val newZoom = (viewportState.zoomScale * zoomDelta)
+                                    .coerceIn(ViewportState.ZOOM_MIN, ViewportState.ZOOM_MAX)
                                 val actualZoomRatio = newZoom / viewportState.zoomScale
 
                                 // Anchor zoom at the pinch midpoint:
@@ -234,7 +235,7 @@ fun DrawingCanvas(
                         lassoPoints.add(Offset(x, y))
 
                         if (activeTool == ToolType.ERASER) {
-                            eraseStrokesNear(Offset(x, y), eraserRadiusPx / viewportState.zoomScale, strokes, onEraseStrokes)
+                            eraseStrokesNear(Offset(x, y), eraserRadiusPx / viewportState.effectiveScale, strokes, onEraseStrokes)
                         }
                         true
                     }
@@ -259,7 +260,7 @@ fun DrawingCanvas(
                             lassoPoints.add(Offset(x, y))
 
                             if (activeTool == ToolType.ERASER) {
-                                eraseStrokesNear(Offset(x, y), eraserRadiusPx / viewportState.zoomScale, strokes, onEraseStrokes)
+                                eraseStrokesNear(Offset(x, y), eraserRadiusPx / viewportState.effectiveScale, strokes, onEraseStrokes)
                             }
                         }
                         true
@@ -311,14 +312,14 @@ fun DrawingCanvas(
         PaperBackgroundRenderer.drawPaperBackground(
             drawScope = this,
             paperStyle = paperStyle,
-            zoomLevel = viewportState.zoomScale,
+            zoomLevel = viewportState.effectiveScale,
             panOffset = viewportState.panOffset
         )
 
         // Apply Viewport Transform Matrix (Zoom & Pan)
         withTransform({
             translate(viewportState.panOffset.x, viewportState.panOffset.y)
-            scale(viewportState.zoomScale, viewportState.zoomScale, Offset.Zero)
+            scale(viewportState.effectiveScale, viewportState.effectiveScale, Offset.Zero)
         }) {
             // 2. Render existing strokes
             strokes.forEach { stroke ->
@@ -371,7 +372,7 @@ fun DrawingCanvas(
                     path = lassoPath,
                     color = Color(0xFFC792EA),
                     style = CanvasStrokeStyle(
-                        width = 2f / viewportState.zoomScale,
+                        width = 2f / viewportState.effectiveScale,
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
                     )
                 )
@@ -380,14 +381,14 @@ fun DrawingCanvas(
             // 5. Render selection bounding box
             val bbox = SelectionManager.calculateBoundingBox(selectedStrokes)
             bbox?.let { box ->
-                val inflated = box.inflate(12f / viewportState.zoomScale)
+                val inflated = box.inflate(12f / viewportState.effectiveScale)
                 drawRoundRect(
                     color = Color(0xFF82AAFF),
                     topLeft = inflated.topLeft,
                     size = inflated.size,
                     cornerRadius = CornerRadius(8f, 8f),
                     style = CanvasStrokeStyle(
-                        width = 2.5f / viewportState.zoomScale,
+                        width = 2.5f / viewportState.effectiveScale,
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
                     )
                 )
@@ -407,7 +408,7 @@ fun DrawingCanvas(
             } else {
                 drawCircle(
                     color = toolConfig.currentActiveColor,
-                    radius = (toolConfig.currentActiveSize * viewportState.zoomScale) / 2f,
+                    radius = (toolConfig.currentActiveSize * viewportState.effectiveScale) / 2f,
                     center = hoverPos
                 )
             }
