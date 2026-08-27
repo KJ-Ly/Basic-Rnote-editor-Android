@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -17,6 +18,69 @@ object PaperBackgroundRenderer {
 
     /** Gap between pages in canvas pixels (both horizontal and vertical). */
     private const val PAGE_GAP_PX = 0f
+
+    /**
+     * Desktop Rnote's `DOTS_WIDTH` (rnote-engine/src/document/background.rs) — a dot is a
+     * 1.5-canvas-px rounded square with corner radius width/3, *not* a circle, and it lives
+     * in document space so it grows with zoom. This renderer draws in screen space (see
+     * [drawPaperBackground]), so the scaling has to be applied by hand; previously the dot
+     * was a fixed 1.6px-radius circle, which meant that at 500% zoom the spacing had grown
+     * 5x while the dot had not, leaving near-invisible specks on a huge empty grid.
+     */
+    private const val DOTS_WIDTH_CANVAS = 1.5f
+
+    /**
+     * Desktop Rnote's `LINE_WIDTH` (same file) — 0.5 canvas px, shared by the ruled, grid
+     * and isometric-grid patterns. Like the dots these lived in screen space here (a flat
+     * 1f / 0.8f), so they thinned out relative to their spacing as you zoomed in.
+     */
+    private const val LINE_WIDTH_CANVAS = 0.5f
+
+    /**
+     * Desktop Rnote's `HEXAGON_HEIGHT` (same file). Rnote's isometric *dots* are small
+     * hexagons rather than round dots — this is their vertex-to-vertex height in canvas px.
+     */
+    private const val ISO_DOT_HEIGHT_CANVAS = 2.0f
+
+    /** Floor shared by every pattern, so it fades but never vanishes when zoomed far out. */
+    private const val PATTERN_MIN_PX = 1f
+
+    /** Screen-space stroke width for the line-based patterns at the current zoom. */
+    private fun patternLineWidth(zoomLevel: Float): Float =
+        (LINE_WIDTH_CANVAS * zoomLevel).coerceAtLeast(PATTERN_MIN_PX)
+
+    /**
+     * One isometric-lattice dot: a regular pointy-top hexagon of height
+     * [ISO_DOT_HEIGHT_CANVAS]. Rnote builds this from `QUARTER_SQRT_THREE`/`HALF_SQRT_THREE`
+     * multiples of the height, which are the half-width and full width of exactly this
+     * hexagon; the vertex order below is our own, not a transcription of its path data.
+     */
+    private fun DrawScope.drawIsoDotHexagon(color: Color, center: Offset, zoomLevel: Float) {
+        val h = (ISO_DOT_HEIGHT_CANVAS * zoomLevel).coerceAtLeast(PATTERN_MIN_PX)
+        val halfH = h / 2f
+        val quarterH = h / 4f
+        val halfW = (sqrt(3f) / 4f) * h
+        val hex = Path().apply {
+            moveTo(center.x, center.y - halfH)
+            lineTo(center.x + halfW, center.y - quarterH)
+            lineTo(center.x + halfW, center.y + quarterH)
+            lineTo(center.x, center.y + halfH)
+            lineTo(center.x - halfW, center.y + quarterH)
+            lineTo(center.x - halfW, center.y - quarterH)
+            close()
+        }
+        drawPath(hex, color)
+    }
+
+    private fun DrawScope.drawPatternDot(color: Color, center: Offset, zoomLevel: Float) {
+        val side = (DOTS_WIDTH_CANVAS * zoomLevel).coerceAtLeast(PATTERN_MIN_PX)
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(center.x - side / 2f, center.y - side / 2f),
+            size = Size(side, side),
+            cornerRadius = CornerRadius(side / 3f, side / 3f)
+        )
+    }
 
     /**
      * Draws the paper background. Called BEFORE the viewport withTransform in DrawingCanvas,
@@ -210,7 +274,7 @@ object PaperBackgroundRenderer {
                     while (x <= pageRect.right + 0.5f) {
                         var y = firstDotY
                         while (y <= pageRect.bottom + 0.5f) {
-                            drawCircle(color = gridColor, radius = 1.6f, center = Offset(x, y))
+                            drawPatternDot(gridColor, Offset(x, y), zoomLevel)
                             y += spacingPx
                         }
                         x += spacingPx
@@ -220,12 +284,12 @@ object PaperBackgroundRenderer {
                 PaperPattern.GRID -> {
                     var x = firstDotX
                     while (x <= pageRect.right + 0.5f) {
-                        drawLine(gridColor, Offset(x, pageRect.top), Offset(x, pageRect.bottom), 1f)
+                        drawLine(gridColor, Offset(x, pageRect.top), Offset(x, pageRect.bottom), patternLineWidth(zoomLevel))
                         x += spacingPx
                     }
                     var y = firstDotY
                     while (y <= pageRect.bottom + 0.5f) {
-                        drawLine(gridColor, Offset(pageRect.left, y), Offset(pageRect.right, y), 1f)
+                        drawLine(gridColor, Offset(pageRect.left, y), Offset(pageRect.right, y), patternLineWidth(zoomLevel))
                         y += spacingPx
                     }
                 }
@@ -233,17 +297,17 @@ object PaperBackgroundRenderer {
                 PaperPattern.LINES -> {
                     var y = firstDotY
                     while (y <= pageRect.bottom + 0.5f) {
-                        drawLine(gridColor, Offset(pageRect.left, y), Offset(pageRect.right, y), 1f)
+                        drawLine(gridColor, Offset(pageRect.left, y), Offset(pageRect.right, y), patternLineWidth(zoomLevel))
                         y += spacingPx
                     }
                 }
 
                 PaperPattern.ISO_GRID -> {
-                    drawIsometricGrid(this, gridColor, spacingPx, pageRect, panOffset)
+                    drawIsometricGrid(this, gridColor, spacingPx, pageRect, panOffset, zoomLevel)
                 }
 
                 PaperPattern.ISO_DOTS -> {
-                    drawIsometricDots(this, gridColor, spacingPx, pageRect, panOffset)
+                    drawIsometricDots(this, gridColor, spacingPx, pageRect, panOffset, zoomLevel)
                 }
 
                 PaperPattern.BLANK -> { /* page background is enough */ }
@@ -277,7 +341,7 @@ object PaperBackgroundRenderer {
                     while (x < width) {
                         var y = startY
                         while (y < height) {
-                            drawCircle(color = gridColor, radius = 1.6f, center = Offset(x, y))
+                            drawPatternDot(gridColor, Offset(x, y), zoomLevel)
                             y += spacingPx
                         }
                         x += spacingPx
@@ -286,27 +350,27 @@ object PaperBackgroundRenderer {
                 PaperPattern.GRID -> {
                     var x = startX
                     while (x < width) {
-                        drawLine(gridColor, Offset(x, 0f), Offset(x, height), 1f)
+                        drawLine(gridColor, Offset(x, 0f), Offset(x, height), patternLineWidth(zoomLevel))
                         x += spacingPx
                     }
                     var y = startY
                     while (y < height) {
-                        drawLine(gridColor, Offset(0f, y), Offset(width, y), 1f)
+                        drawLine(gridColor, Offset(0f, y), Offset(width, y), patternLineWidth(zoomLevel))
                         y += spacingPx
                     }
                 }
                 PaperPattern.LINES -> {
                     var y = startY
                     while (y < height) {
-                        drawLine(gridColor, Offset(0f, y), Offset(width, y), 1f)
+                        drawLine(gridColor, Offset(0f, y), Offset(width, y), patternLineWidth(zoomLevel))
                         y += spacingPx
                     }
                 }
                 PaperPattern.ISO_GRID -> {
-                    drawIsometricGrid(this, gridColor, spacingPx, screenRect, panOffset)
+                    drawIsometricGrid(this, gridColor, spacingPx, screenRect, panOffset, zoomLevel)
                 }
                 PaperPattern.ISO_DOTS -> {
-                    drawIsometricDots(this, gridColor, spacingPx, screenRect, panOffset)
+                    drawIsometricDots(this, gridColor, spacingPx, screenRect, panOffset, zoomLevel)
                 }
                 PaperPattern.BLANK -> { /* solid bg only */ }
             }
@@ -324,8 +388,10 @@ object PaperBackgroundRenderer {
         color: Color,
         spacingPx: Float,
         rect: Rect,
-        panOffset: Offset
+        panOffset: Offset,
+        zoomLevel: Float
     ) {
+        val lineWidth = patternLineWidth(zoomLevel)
         val rowH = spacingPx * sqrt(3f) / 2f
         val phaseX = ((panOffset.x % spacingPx) + spacingPx) % spacingPx
         val phaseY = ((panOffset.y % rowH) + rowH) % rowH
@@ -335,7 +401,7 @@ object PaperBackgroundRenderer {
             var y = rect.top + ((rect.top - phaseY) % rowH + rowH) % rowH
             if (y > rect.top) y -= rowH
             while (y <= rect.bottom + rowH) {
-                drawLine(color, Offset(rect.left, y), Offset(rect.right, y), 0.8f)
+                drawLine(color, Offset(rect.left, y), Offset(rect.right, y), lineWidth)
                 y += rowH
             }
 
@@ -347,7 +413,7 @@ object PaperBackgroundRenderer {
                 val y1 = rect.top
                 val x2 = baseX + (rect.height / rowH) * (spacingPx / 2f)
                 val y2 = rect.bottom
-                drawLine(color, Offset(x1, y1), Offset(x2, y2), 0.8f)
+                drawLine(color, Offset(x1, y1), Offset(x2, y2), lineWidth)
             }
 
             // Diagonal lines: / direction
@@ -357,7 +423,7 @@ object PaperBackgroundRenderer {
                 val y1 = rect.top
                 val x2 = baseX - (rect.height / rowH) * (spacingPx / 2f)
                 val y2 = rect.bottom
-                drawLine(color, Offset(x1, y1), Offset(x2, y2), 0.8f)
+                drawLine(color, Offset(x1, y1), Offset(x2, y2), lineWidth)
             }
         }
     }
@@ -370,7 +436,8 @@ object PaperBackgroundRenderer {
         color: Color,
         spacingPx: Float,
         rect: Rect,
-        panOffset: Offset
+        panOffset: Offset,
+        zoomLevel: Float
     ) {
         val rowH = spacingPx * sqrt(3f) / 2f
         val phaseX = ((panOffset.x % spacingPx) + spacingPx) % spacingPx
@@ -385,7 +452,7 @@ object PaperBackgroundRenderer {
                 var x = rect.left + ((rect.left - phaseX - xOffset) % spacingPx + spacingPx) % spacingPx + xOffset
                 if (x > rect.left + spacingPx) x -= spacingPx
                 while (x <= rect.right + 0.5f) {
-                    drawCircle(color = color, radius = 1.6f, center = Offset(x, y))
+                    drawIsoDotHexagon(color, Offset(x, y), zoomLevel)
                     x += spacingPx
                 }
                 y += rowH
