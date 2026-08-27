@@ -80,14 +80,22 @@ com.rnote.baby/
   are disabled — no implementation. See Roadmap.
 - **Brush size controls**: 3 presets (S/M/L) per tool + numerical adjuster dialog with slider and direct input
 - **Ink smoothing**: Quadratic Bézier midpoint interpolation (InkSmoother.kt)
-- **Hover cursor**: Stylus hover preview (brush circle or eraser ring)
+- **Hover cursor**: Stylus hover preview (brush dot; the eraser shows Rnote's red square)
 
 ### Input Handling
 - **Stylus-only mode** (default): Finger pans/zooms, only stylus draws
 - **Finger drawing mode**: Toggle to allow finger drawing
-- **S-Pen side button**: Edge-triggered undo (press once = undo, hold = no repeat)
+- **S-Pen side button**: Hold to erase — a momentary eraser for the duration of the
+  gesture, latched at ACTION_DOWN so releasing mid-stroke doesn't switch tools. It was
+  bound to undo before; undo is still on Air Actions and the toolbar.
+  **One UI does not use the standard action codes for a barrel-button-held stylus
+  gesture.** Measured on the SM-T870: ACTION_DOWN/UP/MOVE arrive as **211/212/213**,
+  while `buttonState` (`BUTTON_STYLUS_PRIMARY`) and `toolType` are both correct. Unmapped
+  they match no branch of the `when` and fall through, so the button appears completely
+  dead — which reads as "the button isn't detected" and sends you debugging the wrong
+  thing. `DrawingCanvas` normalises them before dispatch.
 - **S-Pen Air Actions**: Page Down = Undo, Page Up = Redo (via onKeyUp)
-- **2-finger pinch-to-zoom**: Anchored to pinch midpoint (0.25x–5.0x range)
+- **2-finger pinch-to-zoom**: Anchored to pinch midpoint (Rnote's 0.2x–6.0x range)
 - **2-finger pan**: Simultaneous with zoom
 
 ### Paper & Background

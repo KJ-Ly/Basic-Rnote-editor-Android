@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -228,9 +229,20 @@ private fun StripActionButton(
  * an axis-aligned square (`EraserConfig::eraser_bounds` is an Aabb), so a round preview
  * would advertise the wrong shape.
  */
-private enum class StrokeWidthPreviewStyle(val shape: Shape) {
-    CIRCLE(CircleShape),
-    ROUNDED_RECT(RoundedCornerShape(2.dp))
+private enum class StrokeWidthPreviewStyle {
+    CIRCLE,
+    ROUNDED_RECT;
+
+    /**
+     * Rnote rounds its rect preview by a flat 3.0 against a widget whose largest square
+     * is 32 across, so the radius is ~9% of the side. A flat radius here instead turned
+     * the smallest preset back into a circle, since 2.dp of rounding on a 5.dp box leaves
+     * almost no straight edge.
+     */
+    fun shapeFor(diameter: Dp): Shape = when (this) {
+        CIRCLE -> CircleShape
+        ROUNDED_RECT -> RoundedCornerShape(diameter * (3f / 32f))
+    }
 }
 
 /**
@@ -288,7 +300,7 @@ private fun StrokeWidthPicker(
             Box(
                 modifier = Modifier
                     .size(dotDiameter)
-                    .clip(previewStyle.shape)
+                    .clip(previewStyle.shapeFor(dotDiameter))
                     .background(if (isSelected) BrnaColors.Accent else BrnaColors.TextPrimaryOnPanel)
             )
         }

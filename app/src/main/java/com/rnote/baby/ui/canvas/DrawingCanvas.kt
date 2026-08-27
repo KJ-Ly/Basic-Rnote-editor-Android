@@ -220,7 +220,20 @@ fun DrawingCanvas(
                     else -> toolConfig.activeTool
                 }
 
-                when (motionEvent.actionMasked) {
+                // Samsung's One UI does not report a barrel-button-held stylus gesture with
+                // the standard action codes. Measured on an SM-T870: DOWN/UP/MOVE arrive as
+                // 211/212/213, while buttonState (BUTTON_STYLUS_PRIMARY) and toolType
+                // (TOOL_TYPE_STYLUS) are both correct. Unmapped, those codes match no branch
+                // below and fall through to `else -> false`, which is why holding the button
+                // appeared to do nothing whatsoever -- not a failure to detect the button.
+                val action = when (motionEvent.actionMasked) {
+                    SAMSUNG_ACTION_PEN_DOWN -> MotionEvent.ACTION_DOWN
+                    SAMSUNG_ACTION_PEN_UP -> MotionEvent.ACTION_UP
+                    SAMSUNG_ACTION_PEN_MOVE -> MotionEvent.ACTION_MOVE
+                    else -> motionEvent.actionMasked
+                }
+
+                when (action) {
                     MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
                         if (isStylus) {
                             if (activeTool == ToolType.ERASER) {
@@ -474,6 +487,15 @@ private fun pressureCurveFor(toolConfig: ToolConfig): PressureCurve = when {
     !toolConfig.isPressureSensitive -> PressureCurve.CONST
     else -> PressureCurve.LINEAR
 }
+
+/**
+ * One UI's proprietary MotionEvent actions for a stylus gesture with the barrel button
+ * held, which it substitutes for ACTION_DOWN / ACTION_UP / ACTION_MOVE. Not in the SDK;
+ * measured on an SM-T870 by logging every event the canvas receives.
+ */
+private const val SAMSUNG_ACTION_PEN_DOWN = 211
+private const val SAMSUNG_ACTION_PEN_UP = 212
+private const val SAMSUNG_ACTION_PEN_MOVE = 213
 
 /**
  * Rnote's `Eraser` colours (GNOME palette reds, see Eraser::draw_on_doc).
