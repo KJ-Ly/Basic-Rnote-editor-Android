@@ -51,12 +51,20 @@ object BrnaColors {
         Color(0xFFA51D2D)  // dark red
     )
 
-    // ── Full palette grid (color dialog) ────────────────────────────────
-    // Leads with the same 9 real defaults, then bonus extras beyond what
-    // desktop Rnote's own 9-slot picker offers.
-    val FullPalette = PenPalette + listOf(
-        Color(0xFF62A0EA), Color(0xFF57E389), Color(0xFFF8E45C), Color(0xFFFFBE6F), Color(0xFFED333B),
-        Color(0xFF9141AC), Color(0xFFC061CB), Color(0xFF63452C), Color(0xFF77767B), Color(0xFF3D3846),
-        Color(0xFFF66151)
-    )
+    // ── Full palette grid ("Pick a Color" dialog) ──────────────────────────
+    // Verbatim GTK4 ColorChooserWidget default palette — the exact grid desktop
+    // Rnote shows, since its color dialog is that widget. Column-major: 9 hue
+    // columns, each a light→dark 5-shade ramp, rendered as one contiguous strip
+    // per column the way GTK draws it.
+    val PaletteColumns: List<List<Color>> = listOf(
+        listOf(0xFF99C1F1, 0xFF62A0EA, 0xFF3584E4, 0xFF1C71D8, 0xFF1A5FB4), // Blue
+        listOf(0xFF8FF0A4, 0xFF57E389, 0xFF33D17A, 0xFF2EC27E, 0xFF26A269), // Green
+        listOf(0xFFF9F06B, 0xFFF8E45C, 0xFFF6D32D, 0xFFF5C211, 0xFFE5A50A), // Yellow
+        listOf(0xFFFFBE6F, 0xFFFFA348, 0xFFFF7800, 0xFFE66100, 0xFFC64600), // Orange
+        listOf(0xFFF66151, 0xFFED333B, 0xFFE01B24, 0xFFC01C28, 0xFFA51D2D), // Red
+        listOf(0xFFDC8ADD, 0xFFC061CB, 0xFF9141AC, 0xFF813D9C, 0xFF613583), // Purple
+        listOf(0xFFCDAB8F, 0xFFB5835A, 0xFF986A44, 0xFF865E3C, 0xFF63452C), // Brown
+        listOf(0xFFFFFFFF, 0xFFF6F5F4, 0xFFDEDDDA, 0xFFC0BFBC, 0xFF9A9996), // Light
+        listOf(0xFF77767B, 0xFF5E5C64, 0xFF3D3846, 0xFF241F31, 0xFF000000)  // Dark
+    ).map { column -> column.map { Color(it) } }
 }
