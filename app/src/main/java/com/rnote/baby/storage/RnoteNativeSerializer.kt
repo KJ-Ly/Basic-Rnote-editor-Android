@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Base64
 import com.rnote.baby.model.EllipseShape
 import com.rnote.baby.model.FreehandShape
+import com.rnote.baby.model.LayoutMode
 import com.rnote.baby.model.LineShape
 import com.rnote.baby.model.NativeBitmapElement
 import com.rnote.baby.model.NativeBrushStroke
@@ -97,15 +98,31 @@ object RnoteNativeSerializer {
         // Include preserved native elements (text, shapes, images) in save-back
         val allElements: List<NativeCanvasElement> = nativeStrokes + doc.nativeElements.filter { it !is NativeBrushStroke }
 
-        // Rnote recomputes a document's extent from what it holds, so derive it rather
-        // than writing a page-sized rect at the origin: the page, widened to cover every
-        // element. Infinite-layout content sits at negative coordinates routinely.
+        // Rnote recomputes a document's extent from what it holds and how it is laid out
+        // (`Document::resize_autoexpand`), so derive the same rect it would rather than
+        // writing a page-sized one: until the file is edited on the desktop it is this
+        // rect that is shown, and a continuous-vertical note written as exactly one page
+        // opens looking like a fixed-size one.
+        val ink = inkBounds(allElements)
         var minX = 0f; var minY = 0f; var maxX = pageW; var maxY = pageH
-        for (el in allElements) {
-            if (el.minX < minX) minX = el.minX
-            if (el.minY < minY) minY = el.minY
-            if (el.maxX > maxX) maxX = el.maxX
-            if (el.maxY > maxY) maxY = el.maxY
+        when (doc.paperStyle.layoutMode) {
+            // A fixed-size document is the format box, full stop. Content drawn outside it
+            // is still kept (Rnote keeps it too) but does not grow the page.
+            LayoutMode.FIXED_SIZE -> Unit
+
+            // Width is pinned to the format; height is the content plus one page of room
+            // to keep writing — the +height is Rnote's, not padding of our own.
+            LayoutMode.CONTINUOUS_VERTICAL ->
+                maxY = maxOf(pageH, (ink?.maxY ?: 0f).coerceAtLeast(0f) + pageH)
+
+            // No bounds to respect, so it is the page widened to cover everything.
+            // Infinite-layout content sits at negative coordinates routinely.
+            LayoutMode.INFINITE -> if (ink != null) {
+                if (ink.minX < minX) minX = ink.minX
+                if (ink.minY < minY) minY = ink.minY
+                if (ink.maxX > maxX) maxX = ink.maxX
+                if (ink.maxY > maxY) maxY = ink.maxY
+            }
         }
 
         return RnoteNativeDocument(
@@ -133,6 +150,29 @@ object RnoteNativeSerializer {
             showBorders = doc.paperStyle.showFormatBorders,
             showOriginIndicator = doc.paperStyle.showOriginIndicator
         )
+    }
+
+    /** Element bounds in canvas coordinates; null when the document is empty. */
+    private class InkBounds(val minX: Float, val minY: Float, val maxX: Float, val maxY: Float)
+
+    /**
+     * The bounds of the ink, not of the input points: a stroke is painted half its width
+     * either side of its centreline, and Rnote's own stroke bounds cover that envelope —
+     * which is why a 2px stroke ending at y=57.947 leaves a desktop-saved document exactly
+     * 58.947 tall past its page. Non-stroke elements already carry painted bounds.
+     */
+    private fun inkBounds(elements: List<NativeCanvasElement>): InkBounds? {
+        if (elements.isEmpty()) return null
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        for (el in elements) {
+            val pad = if (el is NativeBrushStroke) el.strokeWidth / 2f else 0f
+            if (el.minX - pad < minX) minX = el.minX - pad
+            if (el.minY - pad < minY) minY = el.minY - pad
+            if (el.maxX + pad > maxX) maxX = el.maxX + pad
+            if (el.maxY + pad > maxY) maxY = el.maxY + pad
+        }
+        return InkBounds(minX, minY, maxX, maxY)
     }
 
     // ── JSON builder ──────────────────────────────────────────────────────────

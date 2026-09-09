@@ -100,7 +100,8 @@ class DocumentRoundTripTest {
     @Test
     fun `the written extent covers content outside the page`() {
         // An infinite-layout document routinely holds strokes at negative coordinates;
-        // a page-sized rect pinned at the origin does not describe it.
+        // a page-sized rect pinned at the origin does not describe it. The bounds are the
+        // ink's, so a 2px-wide stroke reaches half a width past each of its endpoints.
         val doc = documentWith(
             LayoutMode.INFINITE,
             strokes = listOf(
@@ -112,10 +113,63 @@ class DocumentRoundTripTest {
             )
         )
         val native = RnoteNativeSerializer.bridgeToNative(doc)
-        assertEquals(-400f, native.originX, eps)
-        assertEquals(-250f, native.originY, eps)
-        assertEquals(2400f, native.totalWidth, eps)
-        assertEquals(3250f, native.totalHeight, eps)
+        assertEquals(-401f, native.originX, eps)
+        assertEquals(-251f, native.originY, eps)
+        assertEquals(2402f, native.totalWidth, eps)
+        assertEquals(3252f, native.totalHeight, eps)
+    }
+
+    @Test
+    fun `a continuous vertical document keeps a page of room below its content`() {
+        // Desktop Rnote's own rule (Document::resize_autoexpand): the width is the
+        // format's and the height is the ink plus one more page to write on. Writing the
+        // bare page height instead is what made a continuous note open looking fixed.
+        val native = RnoteNativeSerializer.bridgeToNative(
+            documentWith(
+                LayoutMode.CONTINUOUS_VERTICAL,
+                strokes = listOf(
+                    Stroke(
+                        points = listOf(StrokePoint(40f, 100f, 1f), StrokePoint(300f, 2000f, 1f)),
+                        color = Color.Black,
+                        strokeWidth = 2f
+                    )
+                )
+            )
+        )
+        assertEquals(0f, native.originX, eps)
+        assertEquals(0f, native.originY, eps)
+        assertEquals(1123f, native.totalWidth, eps)
+        assertEquals(2001f + 1587f, native.totalHeight, eps)
+    }
+
+    @Test
+    fun `an empty continuous vertical document is exactly one page`() {
+        val native = RnoteNativeSerializer.bridgeToNative(
+            documentWith(LayoutMode.CONTINUOUS_VERTICAL, strokes = emptyList())
+        )
+        assertEquals(1123f, native.totalWidth, eps)
+        assertEquals(1587f, native.totalHeight, eps)
+    }
+
+    @Test
+    fun `a fixed size document stays the format box whatever it holds`() {
+        // Rnote keeps strokes that stray off the page but does not grow the page for them.
+        val native = RnoteNativeSerializer.bridgeToNative(
+            documentWith(
+                LayoutMode.FIXED_SIZE,
+                strokes = listOf(
+                    Stroke(
+                        points = listOf(StrokePoint(-500f, -500f, 1f), StrokePoint(4000f, 5000f, 1f)),
+                        color = Color.Black,
+                        strokeWidth = 2f
+                    )
+                )
+            )
+        )
+        assertEquals(0f, native.originX, eps)
+        assertEquals(0f, native.originY, eps)
+        assertEquals(1123f, native.totalWidth, eps)
+        assertEquals(1587f, native.totalHeight, eps)
     }
 
     @Test
