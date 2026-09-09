@@ -234,13 +234,51 @@ Read the screenshot, locate the next target, tap, repeat. Caveats:
 
 ---
 
-## Test File
+## Tests
 
-`test.rnote` in the project root is a v0.14 format file from desktop Rnote that can be used to verify import compatibility. Open it via the app's "Open" menu item.
+```
+./gradlew testDebugUnitTest      # report: app/build/reports/tests/testDebugUnitTest/index.html
+```
+
+JVM unit tests in `app/src/test/java/com/rnote/baby/`, no device or emulator needed. They
+cover the layers where a mistake is a wrong *number* rather than a wrong pixel — which is
+most of what the desktop-parity work has actually got wrong so far:
+
+| Suite | What it pins down |
+| --- | --- |
+| `model/PressureCurveTest` | `PressureCurve::apply` for all six curves; clamping; api-name fallback |
+| `render/StrokeOutlineTest` | Segment quads and their half-widths, round caps, the skipped back-to-start segment, lone-point dots, SVG path data |
+| `ui/canvas/EraserHitTestTest` | Square (not circular) eraser bounds, mid-segment hits, loosening by nominal width, single-tap dot sizing |
+| `model/ViewportStateTest` | `effectiveScale` vs `zoomScale`, screen↔canvas inverses, zoom clamping, `displayScaleFor` dpi sanity check |
+| `storage/RnoteNativeRoundTripTest` | `.rnote` writer against `.rnote` reader: points, colour, width, pressure curve, highlighter layer, draw order across the sentinel slot, all patterns |
+| `storage/RnoteFixtureTest` | Parses the real desktop-written `test.rnote` and re-saves it |
+| `storage/DocumentSerializerTest` | The app's own `.json` format, including legacy tool names and unknown-enum fallbacks |
+| `storage/DocumentRoundTripTest` | The whole save-and-reopen loop, `NoteDocument` out and back, via both `.rnote` and `.json` |
+| `model/LayoutModeTest` | Layout api names and the missing-layout fallback |
+
+Notes on the setup:
+
+- `tests/test.rnote` is a v0.14 file from desktop Rnote. `RnoteFixtureTest` finds it by
+  walking up from the module directory, checking each level and its `tests/`, so it stays
+  a single copy that also works as a manual import check via the app's "Open" menu item.
+- `testImplementation(libs.json)` puts a real `org.json` on the test classpath; without it
+  the stub in the mockable `android.jar` would make `DocumentSerializer` untestable.
+- `unitTests.isReturnDefaultValues = true` covers `android.util.Base64`, which
+  `RnoteNativeParser` reaches for only on documents carrying an embedded bitmap.
+
+Not covered here: anything that needs a real Compose runtime or `android.graphics`
+(`DrawingCanvas` input handling, `PaperBackgroundRenderer`, PNG export). Those still need
+the on-device workflow above.
 
 ---
 
 ## Recent Changes (August 2026)
+
+- **Page layout, document extent and format decorations are now actually saved.** `document.config.layout` was read on open (`RnoteNativeParser`) and never written on save, and `bridgeToNative` never read `paperStyle.layoutMode` in the first place — two independent drops on the same field. The visible effect: open an infinite-layout `.rnote`, save it, reopen it, and it came back as a single fixed page, because `FileManager`'s layout mapping ended in `else -> FIXED_SIZE`. The app's own `.json` format lost the same field to a *different* default (`PaperStyle`'s `INFINITE`), so the two save paths disagreed about a document neither of them had changed.
+  - `LayoutMode` now carries Rnote's serde `apiName` and a `fromApiName`/`DEFAULT` pair, mirroring `PressureCurve`. Both readers go through it, so the fallback is stated once. `DEFAULT` is `INFINITE` — matching `PaperStyle`'s own default rather than the old accidental `FIXED_SIZE`, which also stops previously-saved files (which carry no layout key) from collapsing to one page.
+  - The document rect (`x`/`y`/`width`/`height`) was written as a page-sized box pinned at the origin. Real files are nothing like that — `test.rnote` is `x:-4588, y:-6444, 9784×13296`. `RnoteNativeDocument` now carries `originX`/`originY`/`totalWidth`/`totalHeight`; the parser reads them, and `bridgeToNative` derives the extent as the page widened to cover every element rather than carrying a stale rect.
+  - `format.border_color`, `show_borders` and `show_origin_indicator` were parsed into nothing and written as nothing, even though `PaperStyle` has had `formatBorderColor`, `showFormatBorders` and `showOriginIndicator` all along. Both directions now connect. The *stored* `formatBorderColor` is what round-trips, not `currentBorderColor`, which derives a colour from dark mode when the stored one is untouched.
+  - `RnoteNativeSerializer.bridgeToNative` is now `internal` so the save path the app actually uses is reachable from a test; `DocumentRoundTripTest` covers the full loop, which is where all of this was being lost — every layer-by-layer test passed the whole time.
 
 - **Canvas is now density-aware, and the dot pattern scales with zoom** — two separate bugs found by measuring BRNA and desktop Rnote screenshots pixel-by-pixel rather than by eye:
   - `PaperBackgroundRenderer` drew each dot as a **fixed 1.6px-radius circle in screen space** while the spacing scaled with zoom, so the further you zoomed the more the dots fell behind — at 500% the measured dot/spacing ratio was 0.025 against desktop's 0.047. Desktop Rnote (`rnote-engine/src/document/background.rs`) uses `DOTS_WIDTH = 1.5` canvas units drawn as a **rounded square** (corner radius width/3) in *document* space, on a `PATTERN_SIZE_DEFAULT = 32.0` grid. Now matched: measured ratio 0.0471 vs desktop's 0.0473.

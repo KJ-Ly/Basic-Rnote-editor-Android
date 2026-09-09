@@ -89,10 +89,23 @@ data class NativeShapeElement(
 data class RnoteNativeDocument(
     val pageWidth: Float  = 793.7f,   // A4 at 96 dpi
     val pageHeight: Float = 1122.5f,
-    val totalHeight: Float = 1122.5f,
     val background: NativeBackgroundConfig = NativeBackgroundConfig(),
     /** Elements in chrono (draw) order. */
     val elements: List<NativeCanvasElement> = emptyList(),
     /** Layout mode from the .rnote file: "infinite", "fixed_size", "continuous_vertical", etc. */
-    val layout: String = ""
+    val layout: String = "",
+
+    // Document extent: Rnote's `document.x/y/width/height`, the area the document actually
+    // covers. Not the page format -- an infinite-layout document grows to fit its content
+    // and routinely starts at negative coordinates.
+    val originX: Float = 0f,
+    val originY: Float = 0f,
+    val totalWidth: Float = 793.7f,
+    val totalHeight: Float = 1122.5f,
+
+    // Format decorations: Rnote's `config.format.border_color` / `show_borders` /
+    // `show_origin_indicator`.
+    val borderColor: RnoteNativeColor = RnoteNativeColor(0.8706f, 0.8667f, 0.851f, 1f),
+    val showBorders: Boolean = true,
+    val showOriginIndicator: Boolean = true
 )

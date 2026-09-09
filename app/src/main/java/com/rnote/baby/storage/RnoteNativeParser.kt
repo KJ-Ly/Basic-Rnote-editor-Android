@@ -48,7 +48,13 @@ object RnoteNativeParser {
 
     // ── Internal holder types ─────────────────────────────────────────────────
 
-    private data class FormatConfig(val width: Float = 793.7f, val height: Float = 1122.5f)
+    private data class FormatConfig(
+        val width: Float = 793.7f,
+        val height: Float = 1122.5f,
+        val borderColor: RnoteNativeColor = RnoteNativeColor(0.8706f, 0.8667f, 0.851f, 1f),
+        val showBorders: Boolean = true,
+        val showOriginIndicator: Boolean = true
+    )
     private data class BgCfg(
         val color: RnoteNativeColor = RnoteNativeColor.WHITE,
         val pattern: NativePatternType = NativePatternType.DOTS,
@@ -58,6 +64,9 @@ object RnoteNativeParser {
     private data class ParsedDocResult(
         val format: FormatConfig = FormatConfig(),
         val bg: BgCfg = BgCfg(),
+        val originX: Float = 0f,
+        val originY: Float = 0f,
+        val totalWidth: Float = 0f,
         val totalHeight: Float = 0f,
         val layout: String = ""
     )
@@ -102,17 +111,26 @@ object RnoteNativeParser {
         return RnoteNativeDocument(
             pageWidth   = docResult.format.width,
             pageHeight  = docResult.format.height,
-            totalHeight = if (docResult.totalHeight > 0f) docResult.totalHeight else docResult.format.height,
             background  = NativeBackgroundConfig(docResult.bg.color, docResult.bg.pattern, docResult.bg.patternW, docResult.bg.patternH, docResult.bg.patternColor),
             elements    = elements,
-            layout      = docResult.layout
+            layout      = docResult.layout,
+            // x and y are meaningful at zero and routinely negative, so they pass straight
+            // through; a missing width/height falls back to the page format.
+            originX     = docResult.originX,
+            originY     = docResult.originY,
+            totalWidth  = if (docResult.totalWidth > 0f) docResult.totalWidth else docResult.format.width,
+            totalHeight = if (docResult.totalHeight > 0f) docResult.totalHeight else docResult.format.height,
+            borderColor = docResult.format.borderColor,
+            showBorders = docResult.format.showBorders,
+            showOriginIndicator = docResult.format.showOriginIndicator
         )
     }
 
     // ── Document block ────────────────────────────────────────────────────────
 
     private fun parseDocument(reader: JsonReader): ParsedDocResult {
-        var format = FormatConfig(); var bg = BgCfg(); var h = 0f; var layout = ""
+        var format = FormatConfig(); var bg = BgCfg(); var layout = ""
+        var x = 0f; var y = 0f; var w = 0f; var h = 0f
         reader.beginObject()
         while (reader.hasNext()) {
             when (reader.nextName()) {
@@ -128,26 +146,35 @@ object RnoteNativeParser {
                     }
                     reader.endObject()
                 }
-                "height" -> h = reader.nextDouble().toFloat()
-                else     -> reader.skipValue()
-            }
-        }
-        reader.endObject()
-        return ParsedDocResult(format, bg, h, layout)
-    }
-
-    private fun parseFormatConfig(reader: JsonReader): FormatConfig {
-        var w = 793.7f; var h = 1122.5f
-        reader.beginObject()
-        while (reader.hasNext()) {
-            when (reader.nextName()) {
+                "x"      -> x = reader.nextDouble().toFloat()
+                "y"      -> y = reader.nextDouble().toFloat()
                 "width"  -> w = reader.nextDouble().toFloat()
                 "height" -> h = reader.nextDouble().toFloat()
                 else     -> reader.skipValue()
             }
         }
         reader.endObject()
-        return FormatConfig(w, h)
+        return ParsedDocResult(format, bg, x, y, w, h, layout)
+    }
+
+    private fun parseFormatConfig(reader: JsonReader): FormatConfig {
+        var w = 793.7f; var h = 1122.5f
+        var borderColor = RnoteNativeColor(0.8706f, 0.8667f, 0.851f, 1f)
+        var showBorders = true
+        var showOrigin = true
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "width"  -> w = reader.nextDouble().toFloat()
+                "height" -> h = reader.nextDouble().toFloat()
+                "border_color" -> borderColor = parseColor(reader)
+                "show_borders" -> showBorders = reader.nextBoolean()
+                "show_origin_indicator" -> showOrigin = reader.nextBoolean()
+                else     -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return FormatConfig(w, h, borderColor, showBorders, showOrigin)
     }
 
     private fun parseBgConfig(reader: JsonReader): BgCfg {

@@ -54,7 +54,7 @@ object RnoteNativeSerializer {
 
     // ── Bridge NoteDocument → RnoteNativeDocument ─────────────────────────────
 
-    private fun bridgeToNative(doc: NoteDocument): RnoteNativeDocument {
+    internal fun bridgeToNative(doc: NoteDocument): RnoteNativeDocument {
         val nativePattern = when (doc.paperStyle.pattern) {
             PaperPattern.DOTS     -> NativePatternType.DOTS
             PaperPattern.GRID     -> NativePatternType.GRID
@@ -95,10 +95,20 @@ object RnoteNativeSerializer {
         // Include preserved native elements (text, shapes, images) in save-back
         val allElements: List<NativeCanvasElement> = nativeStrokes + doc.nativeElements.filter { it !is NativeBrushStroke }
 
+        // Rnote recomputes a document's extent from what it holds, so derive it rather
+        // than writing a page-sized rect at the origin: the page, widened to cover every
+        // element. Infinite-layout content sits at negative coordinates routinely.
+        var minX = 0f; var minY = 0f; var maxX = pageW; var maxY = pageH
+        for (el in allElements) {
+            if (el.minX < minX) minX = el.minX
+            if (el.minY < minY) minY = el.minY
+            if (el.maxX > maxX) maxX = el.maxX
+            if (el.maxY > maxY) maxY = el.maxY
+        }
+
         return RnoteNativeDocument(
             pageWidth   = pageW,
             pageHeight  = pageH,
-            totalHeight = pageH,
             background  = com.rnote.baby.model.NativeBackgroundConfig(
                 color        = bgColor,
                 pattern      = nativePattern,
@@ -106,7 +116,20 @@ object RnoteNativeSerializer {
                 patternHeight = doc.paperStyle.gridSpacingPx,
                 patternColor = gridColor
             ),
-            elements = allElements
+            elements = allElements,
+            layout = doc.paperStyle.layoutMode.apiName,
+            originX = minX,
+            originY = minY,
+            totalWidth = maxX - minX,
+            totalHeight = maxY - minY,
+            // The stored field, not `currentBorderColor` -- that one derives a colour from
+            // dark mode when the stored one is untouched, and it is the stored one an import
+            // populates, so round-tripping it is what keeps native -> app -> native exact.
+            borderColor = doc.paperStyle.formatBorderColor.let {
+                RnoteNativeColor(it.red, it.green, it.blue, it.alpha)
+            },
+            showBorders = doc.paperStyle.showFormatBorders,
+            showOriginIndicator = doc.paperStyle.showOriginIndicator
         )
     }
 
@@ -144,17 +167,26 @@ object RnoteNativeSerializer {
         val bg = doc.background
         append("""{
             |"config":{
-            |  "format":{"width":${doc.pageWidth},"height":${doc.pageHeight},"dpi":96,"orientation":"portrait"},
+            |  "format":{
+            |    "width":${doc.pageWidth},
+            |    "height":${doc.pageHeight},
+            |    "dpi":96,
+            |    "orientation":"portrait",
+            |    "border_color":${doc.borderColor.toJson()},
+            |    "show_borders":${doc.showBorders},
+            |    "show_origin_indicator":${doc.showOriginIndicator}
+            |  },
             |  "background":{
             |    "color":${bg.color.toJson()},
             |    "pattern":"${bg.pattern.toApiString()}",
             |    "pattern_size":[${bg.patternWidth},${bg.patternHeight}],
             |    "pattern_color":${bg.patternColor.toJson()}
-            |  }
+            |  },
+            |  "layout":"${doc.layout}"
             |},
-            |"x":0.0,
-            |"y":0.0,
-            |"width":${doc.pageWidth},
+            |"x":${doc.originX},
+            |"y":${doc.originY},
+            |"width":${doc.totalWidth},
             |"height":${doc.totalHeight}
             |}""".trimMargin().replace("\n", ""))
     }

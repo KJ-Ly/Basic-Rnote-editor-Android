@@ -3,6 +3,7 @@ package com.rnote.baby.storage
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.rnote.baby.model.InkPoint
+import com.rnote.baby.model.LayoutMode
 import com.rnote.baby.model.PageSize
 import com.rnote.baby.model.PaperPattern
 import com.rnote.baby.model.PaperStyle
@@ -30,6 +31,9 @@ object DocumentSerializer {
         paperObj.put("isDarkMode", document.paperStyle.isDarkMode)
         paperObj.put("dotDensityDpi", document.paperStyle.dotDensityDpi)
         paperObj.put("pageSize", document.paperStyle.pageSize.name)
+        // Omitting this let the layout reset to PaperStyle's default on every reload, the
+        // same defect the .rnote writer had -- only to a different default.
+        paperObj.put("layoutMode", document.paperStyle.layoutMode.name)
         root.put("paperStyle", paperObj)
 
         // Strokes Array
@@ -85,11 +89,17 @@ object DocumentSerializer {
             } catch (e: Exception) {
                 PageSize.LETTER
             }
+            val layoutMode = try {
+                LayoutMode.valueOf(paperObj.optString("layoutMode", LayoutMode.DEFAULT.name))
+            } catch (e: Exception) {
+                LayoutMode.DEFAULT
+            }
             paperStyle = PaperStyle(
                 pattern = pattern,
                 isDarkMode = isDarkMode,
                 dotDensityDpi = dotDensityDpi,
-                pageSize = pageSize
+                pageSize = pageSize,
+                layoutMode = layoutMode
             )
         }
 

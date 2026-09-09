@@ -40,6 +40,14 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests {
+            // The parser reaches for android.util.Base64 only on documents that carry an
+            // embedded bitmap; returning defaults keeps the rest of it testable on the JVM
+            // instead of pulling in a whole Android runtime for the sake of one branch.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -56,4 +64,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
 
     debugImplementation(libs.androidx.ui.tooling)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.json)
 }

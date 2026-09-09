@@ -160,10 +160,6 @@ object FileManager {
         val formatH = native.pageHeight
         val bg = native.background
 
-        // Map layout mode: "infinite" → our INFINITE paged mode (with tile size),
-        // anything else → CUSTOM with exact native dimensions
-        val isInfiniteLayout = native.layout.equals("infinite", ignoreCase = true)
-
         val paperStyle = PaperStyle(
             pattern = when (bg.pattern) {
                 com.rnote.baby.model.NativePatternType.GRID     -> PaperPattern.GRID
@@ -175,17 +171,18 @@ object FileManager {
             },
             isDarkMode = bg.color.r < 0.5f,
             pageSize = PageSize.CUSTOM,
-            layoutMode = when {
-                isInfiniteLayout -> com.rnote.baby.model.LayoutMode.INFINITE
-                native.layout.equals("continuous_vertical", ignoreCase = true) -> com.rnote.baby.model.LayoutMode.CONTINUOUS_VERTICAL
-                else -> com.rnote.baby.model.LayoutMode.FIXED_SIZE
-            },
+            // A file with no layout at all used to land on FIXED_SIZE here, which is how
+            // an infinite document silently became a single page on reload.
+            layoutMode = com.rnote.baby.model.LayoutMode.fromApiName(native.layout),
             customWidthPx = formatW,
             customHeightPx = formatH,
             customGridSpacingPx = bg.patternWidth,
             customPatternHeightPx = bg.patternHeight,
             customBackgroundColor = bg.color.toComposeColor(),
-            customGridColor = bg.patternColor.toComposeColor()
+            customGridColor = bg.patternColor.toComposeColor(),
+            showFormatBorders = native.showBorders,
+            showOriginIndicator = native.showOriginIndicator,
+            formatBorderColor = native.borderColor.toComposeColor()
         )
 
         return NoteDocument(
