@@ -15,19 +15,20 @@ import java.io.File
  */
 class RnoteFixtureTest {
 
-    private fun fixture(): File =
+    private fun fixture(name: String = FIXTURE_NAME): File =
         generateSequence(File("").absoluteFile) { it.parentFile }
             .take(4)
             // Each level and its `tests/`, since that is where the sample files live.
             .flatMap { dir ->
-                sequenceOf(File(dir, FIXTURE_NAME), File(File(dir, "tests"), FIXTURE_NAME))
+                sequenceOf(File(dir, name), File(File(dir, "tests"), name))
             }
             .firstOrNull { it.isFile }
             ?: throw AssertionError(
-                "$FIXTURE_NAME not found at or above ${File("").absolutePath}"
+                "$name not found at or above ${File("").absolutePath}"
             )
 
-    private fun parseFixture() = fixture().inputStream().use { RnoteNativeParser.parse(it) }
+    private fun parseFixture(name: String = FIXTURE_NAME) =
+        fixture(name).inputStream().use { RnoteNativeParser.parse(it) }
 
     @Test
     fun `a desktop-written file parses into strokes on a sane page`() {
@@ -99,7 +100,25 @@ class RnoteFixtureTest {
         assertEquals(original.borderColor.r, reparsed.borderColor.r, 1e-3f)
     }
 
+    @Test
+    fun `a stroke drawn as bezier segments keeps all of its points`() {
+        // Desktop Rnote records a pen stroke as `cubbezto` segments; only the slowest
+        // scribbles come out as pure `lineto`, which is all test.rnote happens to hold.
+        // A parser that knows just `lineto` reads such a stroke as its two endpoints —
+        // in L2b.rnote the smile of a face came through as a 3px dash.
+        val strokes = parseFixture(CURVE_FIXTURE_NAME).elements
+            .filterIsInstance<NativeBrushStroke>()
+        val longest = strokes.maxByOrNull { it.points.size }
+            ?: throw AssertionError("expected brush strokes in $CURVE_FIXTURE_NAME")
+
+        assertEquals(206, longest.points.size)
+        // The curve sweeps the width of the face; its endpoints are 3px apart.
+        assertTrue("collapsed to its endpoints", longest.maxX - longest.minX > 200f)
+        assertTrue("collapsed to its endpoints", longest.maxY - longest.minY > 100f)
+    }
+
     private companion object {
         const val FIXTURE_NAME = "test.rnote"
+        const val CURVE_FIXTURE_NAME = "L2b.rnote"
     }
 }

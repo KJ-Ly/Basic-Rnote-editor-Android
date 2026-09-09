@@ -326,38 +326,27 @@ object RnoteNativeParser {
                     while (reader.hasNext()) {
                         reader.beginObject()
                         while (reader.hasNext()) {
-                            when (reader.nextName()) {
-                                "lineto" -> {
-                                    reader.beginObject()
-                                    while (reader.hasNext()) {
-                                        when (reader.nextName()) {
-                                            "end" -> pts.add(parsePathPoint(reader))
-                                            else  -> reader.skipValue()
-                                        }
+                            // Every `PenPathSegment` variant — `lineto`, `quadbezto`,
+                            // `cubbezto` — is an object carrying the `end` element it
+                            // draws to, so the variant name is not worth matching on:
+                            // naming them one by one is how `cubbezto` came to be
+                            // skipped, which reduced every curve a desktop pen drew to
+                            // the straight line between its two endpoints.
+                            reader.nextName()
+                            if (reader.peek() == JsonToken.BEGIN_OBJECT) {
+                                reader.beginObject()
+                                while (reader.hasNext()) {
+                                    when (reader.nextName()) {
+                                        // The control points are Rnote's own smoothing of
+                                        // the input; `end` is the element the pen actually
+                                        // reported, which is what this app draws through.
+                                        "end" -> pts.add(parsePathPoint(reader))
+                                        else  -> reader.skipValue()
                                     }
-                                    reader.endObject()
                                 }
-                                "quadbez" -> {
-                                    reader.beginObject()
-                                    while (reader.hasNext()) {
-                                        when (reader.nextName()) {
-                                            "end" -> pts.add(parsePathPoint(reader))
-                                            else  -> reader.skipValue()
-                                        }
-                                    }
-                                    reader.endObject()
-                                }
-                                "cubbez" -> {
-                                    reader.beginObject()
-                                    while (reader.hasNext()) {
-                                        when (reader.nextName()) {
-                                            "end" -> pts.add(parsePathPoint(reader))
-                                            else  -> reader.skipValue()
-                                        }
-                                    }
-                                    reader.endObject()
-                                }
-                                else -> reader.skipValue()
+                                reader.endObject()
+                            } else {
+                                reader.skipValue()
                             }
                         }
                         reader.endObject()
