@@ -173,6 +173,72 @@ object PaperBackgroundRenderer {
         }
     }   // end drawPaperBackground
 
+    // ── Out-of-bounds scrim ────────────────────────────────────────────────────
+
+    /**
+     * Alpha of the veil laid over canvas that lies outside the document. Two values
+     * because a dark note is already dark outside its pages, so the same veil that reads
+     * clearly on white paper would barely show there.
+     */
+    private const val SCRIM_ALPHA_LIGHT = 0.3f
+    private const val SCRIM_ALPHA_DARK = 0.45f
+
+    /**
+     * Dims everything outside the area the layout actually covers — the single page at the
+     * origin in Fixed Size, the column of pages from y=0 down in Continuous Vertical.
+     * Nothing clamps drawing to those bounds (Rnote keeps such strokes in the file too),
+     * so without this the canvas gives no sign that a long vertical note is being written
+     * off the edge of a one-page document.
+     *
+     * Screen-space like [drawPaperBackground], but called AFTER the strokes so the ink
+     * out there is dimmed with the paper rather than sitting brightly on top of it.
+     */
+    fun drawOutOfBoundsScrim(
+        drawScope: DrawScope,
+        paperStyle: PaperStyle,
+        zoomLevel: Float = 1.0f,
+        panOffset: Offset = Offset.Zero
+    ) {
+        // The pattern-only fallback draws no pages at all, so it has no outside.
+        if (paperStyle.pageSize.isInfinite || !paperStyle.showPageBoundaries) return
+        if (paperStyle.layoutMode == com.rnote.baby.model.LayoutMode.INFINITE) return
+
+        val screenW = drawScope.size.width
+        val screenH = drawScope.size.height
+
+        val docLeft = panOffset.x
+        val docTop = panOffset.y
+        val docRight = paperStyle.effectivePageWidthPx * zoomLevel + panOffset.x
+        // Continuous Vertical grows downwards without end, so it has no bottom edge to
+        // dim past — clamping to the screen leaves that strip empty.
+        val docBottom = if (paperStyle.layoutMode == com.rnote.baby.model.LayoutMode.FIXED_SIZE) {
+            paperStyle.effectivePageHeightPx * zoomLevel + panOffset.y
+        } else {
+            screenH
+        }
+
+        val scrim = Color.Black.copy(
+            alpha = if (paperStyle.isDarkMode) SCRIM_ALPHA_DARK else SCRIM_ALPHA_LIGHT
+        )
+
+        with(drawScope) {
+            fun dim(left: Float, top: Float, right: Float, bottom: Float) {
+                val l = left.coerceIn(0f, screenW)
+                val t = top.coerceIn(0f, screenH)
+                val r = right.coerceIn(0f, screenW)
+                val b = bottom.coerceIn(0f, screenH)
+                if (r <= l || b <= t) return
+                drawRect(color = scrim, topLeft = Offset(l, t), size = Size(r - l, b - t))
+            }
+            // Full-width bands above and below, then the two side strips between them, so
+            // the four rects tile the outside exactly once — no seams, no double-darkening.
+            dim(0f, 0f, screenW, docTop)
+            dim(0f, docBottom, screenW, screenH)
+            dim(0f, docTop, docLeft, docBottom)
+            dim(docRight, docTop, screenW, docBottom)
+        }
+    }
+
     // ── Per-page rendering ─────────────────────────────────────────────────────
 
     private fun drawPage(

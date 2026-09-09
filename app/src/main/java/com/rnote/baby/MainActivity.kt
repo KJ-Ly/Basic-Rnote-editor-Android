@@ -22,7 +22,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +40,7 @@ import com.rnote.baby.export.ExportScope
 import com.rnote.baby.model.BrushStyle
 import com.rnote.baby.model.NativeCanvasElement
 import com.rnote.baby.model.NoteDocument
+import com.rnote.baby.model.PaperStyle
 import com.rnote.baby.model.Stroke
 import com.rnote.baby.model.StrokePoint
 import com.rnote.baby.model.ToolConfig
@@ -346,9 +346,15 @@ class MainActivity : ComponentActivity() {
                 "${col + 1}, ${row + 1}"  // 1-indexed display
             }
 
-            // ── Persist settings whenever they change ─────────────────────────────
-            SideEffect {
-                SettingsManager.save(this, paperStyle, toolConfig.allowFingerDrawing)
+            // ── Persist settings ──────────────────────────────────────────────────
+            // Only ever from an explicit choice (the Page Settings sheet, the finger-draw
+            // toggle). This used to be a SideEffect that mirrored every paperStyle change
+            // into SharedPreferences, which meant opening any .rnote silently made that
+            // file's format the app-wide default: open a desktop fixed-size note, start a
+            // new note, and it was still Fixed Size — that is how a continuous-vertical
+            // note got written to disk as `fixed_size`.
+            val persistSettings = { style: PaperStyle ->
+                SettingsManager.save(this, style, toolConfig.allowFingerDrawing)
             }
 
             // ── Document load handler ─────────────────────────────────────────────
@@ -358,6 +364,8 @@ class MainActivity : ComponentActivity() {
                 redoStack.clear()
                 selectedStrokes.clear()
                 strokes.addAll(doc.strokes)
+                // The file's format is the document's, not the user's default — so it is
+                // deliberately not persisted; the next new note starts from preferences.
                 paperStyle = doc.paperStyle
                 documentTitle = doc.title
                 documentNativeElements = doc.nativeElements
@@ -368,9 +376,11 @@ class MainActivity : ComponentActivity() {
             // ── New document handler ──────────────────────────────────────────────
             // A harder reset than Clear Canvas: the title and the undo history go too,
             // so there's no way back — hence the confirmation when edits are unsaved.
-            // paperStyle deliberately survives: it's a persisted user preference
-            // (SettingsManager), not a per-document property.
+            // The paper style goes back to the stored preference rather than surviving:
+            // it belongs to the document now, so whatever an opened file brought with it
+            // must not follow the user into their next note.
             val startNewDocument = {
+                paperStyle = SettingsManager.loadPaperStyle(this)
                 strokes.clear()
                 undoStack.clear()
                 redoStack.clear()
@@ -429,6 +439,9 @@ class MainActivity : ComponentActivity() {
                             },
                             onToggleFingerDrawing = {
                                 toolConfig = toolConfig.copy(allowFingerDrawing = !toolConfig.allowFingerDrawing)
+                                SettingsManager.save(
+                                    this, paperStyle, toolConfig.allowFingerDrawing
+                                )
                             },
                             onSaveDocument = {
                                 val currentDoc = NoteDocument(
@@ -601,7 +614,13 @@ class MainActivity : ComponentActivity() {
                         if (showPageSettings) {
                             PageSettingsSheet(
                                 paperStyle = paperStyle,
-                                onPaperStyleChanged = { paperStyle = it },
+                                onPaperStyleChanged = {
+                                    paperStyle = it
+                                    // An explicit choice is both an edit to this document
+                                    // and the default the next new note should start from.
+                                    persistSettings(it)
+                                    isModified = true
+                                },
                                 onDismiss = { showPageSettings = false },
                                 dockedAsSidePanel = !isCompactWidth,
                                 modifier = Modifier.align(Alignment.CenterEnd)
@@ -708,9 +727,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Settings are also saved via SideEffect on every change, but we save
-        // on stop as a belt-and-suspenders guarantee before the process is killed.
-        // We don't have access to Compose state here, so SideEffect handles it.
+        // Nothing to do: preferences are written at the moment they are chosen (see
+        // persistSettings), and the open document's own style is not a preference.
     }
 
     /**

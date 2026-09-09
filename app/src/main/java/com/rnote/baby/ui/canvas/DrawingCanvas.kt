@@ -464,7 +464,16 @@ fun DrawingCanvas(
             }
         }
 
-        // 7. Render the brush hover cursor (screen space). The eraser has its own
+        // 7. Veil the canvas outside the document, over the strokes so ink out there is
+        // dimmed too — see PaperBackgroundRenderer.drawOutOfBoundsScrim.
+        PaperBackgroundRenderer.drawOutOfBoundsScrim(
+            drawScope = this,
+            paperStyle = paperStyle,
+            zoomLevel = viewportState.effectiveScale,
+            panOffset = viewportState.panOffset
+        )
+
+        // 8. Render the brush hover cursor (screen space). The eraser has its own
         // indicator above, drawn in canvas space because its size is a document size.
         hoverOffset?.let { hoverPos ->
             drawCircle(
