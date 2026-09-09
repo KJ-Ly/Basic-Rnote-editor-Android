@@ -34,7 +34,9 @@ object RnoteNativeSerializer {
     // ── Entry points ──────────────────────────────────────────────────────────
 
     fun serialize(context: Context, uri: Uri, doc: RnoteNativeDocument): Boolean = try {
-        context.contentResolver.openOutputStream(uri)!!.use { serialize(it, doc) }
+        // "wt" truncates; the default mode leaves a shorter save sitting inside the
+        // remains of a longer one, which for GZIP means a file that no longer parses.
+        context.contentResolver.openOutputStream(uri, "wt")!!.use { serialize(it, doc) }
         true
     } catch (e: Exception) { e.printStackTrace(); false }
 

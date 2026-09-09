@@ -8,6 +8,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.SaveAs
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -33,7 +35,7 @@ import com.rnote.baby.ui.theme.BrnaColors
 
 /**
  * Trimmed to match desktop Rnote's headerbar: title + Page Settings + overflow
- * (Open/Save/Export/Clear) only. Undo/redo live in [PenPicker] now (Rnote made
+ * (New/Open/Save/Export/Clear) only. Undo/redo live in [PenPicker] now (Rnote made
  * the same move in v0.7.0 — bottom-center is thumb-reachable, top-right isn't).
  * Pattern cycling, theme, and landscape are already controllable from Page
  * Settings, so the duplicate quick-toggles that used to live here were removed
@@ -52,9 +54,10 @@ fun RnoteTopBar(
     onTitleTap: () -> Unit,
     onToggleFingerDrawing: () -> Unit,
     onSaveDocument: () -> Unit,
+    onSaveDocumentAs: () -> Unit,
     onOpenDocument: () -> Unit,
-    onExportSvg: () -> Unit,
-    onExportPng: () -> Unit,
+    onNewDocument: () -> Unit,
+    onExport: () -> Unit,
     onClearCanvas: () -> Unit,
     onOpenPageSettings: () -> Unit
 ) {
@@ -119,7 +122,7 @@ fun RnoteTopBar(
                 Icon(Icons.Default.Article, contentDescription = "Page Settings", tint = iconTint)
             }
 
-            // ⋮ Overflow — Save, Open, Export, Clear
+            // ⋮ Overflow — New, Open, Save, Export, Clear
             IconButton(onClick = { showOverflowMenu = true }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = iconTint)
 
@@ -128,25 +131,34 @@ fun RnoteTopBar(
                     onDismissRequest = { showOverflowMenu = false }
                 ) {
                     DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.NoteAdd, null) },
+                        text = { Text("New") },
+                        onClick = { showOverflowMenu = false; onNewDocument() }
+                    )
+                    DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.FolderOpen, null) },
                         text = { Text("Open…") },
                         onClick = { showOverflowMenu = false; onOpenDocument() }
                     )
+                    // Save writes straight back over the note's own file; picking a new
+                    // name or folder is what Save As is for.
                     DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.Article, null) },
                         text = { Text(if (isModified) "Save  •" else "Save") },
                         onClick = { showOverflowMenu = false; onSaveDocument() }
                     )
-                    HorizontalDivider()
                     DropdownMenuItem(
-                        leadingIcon = { Icon(Icons.Default.IosShare, null) },
-                        text = { Text("Export SVG…") },
-                        onClick = { showOverflowMenu = false; onExportSvg() }
+                        leadingIcon = { Icon(Icons.Default.SaveAs, null) },
+                        text = { Text("Save As…") },
+                        onClick = { showOverflowMenu = false; onSaveDocumentAs() }
                     )
+                    HorizontalDivider()
+                    // One entry, not one per format: scope and format are both chosen
+                    // in the export sheet, the way desktop Rnote's export dialogs do it.
                     DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.IosShare, null) },
-                        text = { Text("Export PNG…") },
-                        onClick = { showOverflowMenu = false; onExportPng() }
+                        text = { Text("Export…") },
+                        onClick = { showOverflowMenu = false; onExport() }
                     )
                     HorizontalDivider()
                     DropdownMenuItem(

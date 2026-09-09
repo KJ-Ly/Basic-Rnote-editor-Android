@@ -2,8 +2,8 @@ package com.rnote.baby.storage
 
 import android.content.Context
 import android.net.Uri
-import com.rnote.baby.export.ImageExporter
-import com.rnote.baby.export.SvgExporter
+import com.rnote.baby.export.DocumentExporter
+import com.rnote.baby.export.ExportPrefs
 import com.rnote.baby.model.NoteDocument
 import com.rnote.baby.model.PaperPattern
 import com.rnote.baby.model.PaperStyle
@@ -23,11 +23,19 @@ object FileManager {
     private const val GZIP_MAGIC_2 = 0x8B.toByte()
 
     /**
-     * Detects format by sniffing the first two bytes, then dispatches to the
-     * appropriate parser. Returns a [LoadResult] carrying the document and
-     * whether the source was a native .rnote file.
+     * A loaded document together with the format its bytes were actually in.
+     *
+     * Save writes back over the same file now, so the caller has to know which format to
+     * write — and it can't ask the file name, since a `.rnote` that was renamed is still
+     * a `.rnote` and writing our JSON over it would destroy it.
      */
-    fun loadDocumentFromUri(context: Context, uri: Uri): NoteDocument? {
+    data class LoadedDocument(val document: NoteDocument, val isNativeRnote: Boolean)
+
+    /**
+     * Detects the format by sniffing the first two bytes, then dispatches to the
+     * appropriate parser.
+     */
+    fun loadDocumentFromUri(context: Context, uri: Uri): LoadedDocument? {
         return try {
             context.contentResolver.openInputStream(uri)?.use { raw ->
                 val buffered = BufferedInputStream(raw, 4)
@@ -39,11 +47,13 @@ object FileManager {
                 if (b1 == GZIP_MAGIC_1 && b2 == GZIP_MAGIC_2) {
                     // Native .rnote — parse then bridge to our editable model
                     val native = RnoteNativeParser.parse(buffered)
-                    bridgeNativeToNoteDocument(native)
+                    LoadedDocument(bridgeNativeToNoteDocument(native), isNativeRnote = true)
                 } else {
                     // Our JSON format
                     val jsonContent = BufferedReader(InputStreamReader(buffered)).readText()
-                    DocumentSerializer.parseJson(jsonContent)
+                    LoadedDocument(
+                        DocumentSerializer.parseJson(jsonContent), isNativeRnote = false
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -83,7 +93,9 @@ object FileManager {
         } else {
             try {
                 val jsonContent = DocumentSerializer.toJson(document)
-                context.contentResolver.openOutputStream(uri, "w")?.use { out ->
+                // "wt", not "w": some providers don't truncate on "w", which would
+                // leave the tail of a longer previous save behind the new one.
+                context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
                     out.write(jsonContent.toByteArray(Charsets.UTF_8))
                     out.flush()
                 }
@@ -107,30 +119,29 @@ object FileManager {
 
     // ── Export ────────────────────────────────────────────────────────────────
 
-    fun exportSvgToUri(context: Context, uri: Uri, document: NoteDocument): Boolean {
-        return try {
-            val svgContent = SvgExporter.exportToSvg(document)
-            context.contentResolver.openOutputStream(uri, "w")?.use { out ->
-                out.write(svgContent.toByteArray(Charsets.UTF_8))
-                out.flush()
-            }
-            true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
-    }
+    /**
+     * A single-file export — the whole document, or the current selection. What each
+     * scope covers is [DocumentExporter]'s business; this is the file-I/O entry point
+     * the rest of the app calls.
+     */
+    fun exportToUri(
+        context: Context,
+        uri: Uri,
+        document: NoteDocument,
+        selection: List<Stroke>,
+        prefs: ExportPrefs
+    ): DocumentExporter.Result =
+        DocumentExporter.exportSingle(context, uri, document, selection, prefs)
 
-    fun exportPngToUri(context: Context, uri: Uri, document: NoteDocument): Boolean {
-        return try {
-            context.contentResolver.openOutputStream(uri, "w")?.use { out ->
-                ImageExporter.exportToPng(document, out)
-            } ?: false
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
-    }
+    /** A page-per-file export into the folder the user picked. */
+    fun exportPagesToTree(
+        context: Context,
+        treeUri: Uri,
+        document: NoteDocument,
+        prefs: ExportPrefs,
+        baseName: String
+    ): DocumentExporter.Result =
+        DocumentExporter.exportPages(context, treeUri, document, prefs, baseName)
 
     /**
      * Converts a parsed native document to our editable [NoteDocument].

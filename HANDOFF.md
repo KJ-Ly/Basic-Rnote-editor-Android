@@ -36,6 +36,7 @@ com.rnote.baby/
 │   │   ├── ColorPicker.kt        # Top-center: stroke/fill pads + palette + full-palette dialog
 │   │   ├── PenConfigStrip.kt     # Left edge, vertically centered: per-pen settings (swaps by active pen)
 │   │   ├── PageSettingsSheet.kt  # 3-section settings; docked side panel at tablet width, modal sheet below the breakpoint
+│   │   ├── ExportSheet.kt        # Single export dialog: scope (document/pages/selection) + Rnote's options
 │   │   └── RnoteTopBar.kt        # Trimmed top bar: title, finger-draw toggle, page settings, overflow menu
 │   ├── icons/
 │   │   ├── CustomIcons.kt        # PenPicker's 6 pen icons, vendored from real Rnote SVGs (GPL-3.0)
@@ -50,9 +51,17 @@ com.rnote.baby/
 │   ├── RnoteNativeParser.kt      # Streaming GZIP+JSON parser for .rnote files
 │   ├── RnoteNativeSerializer.kt  # Serializer back to .rnote format
 │   └── SettingsManager.kt        # SharedPreferences persistence
-├── export/
+├── export/                        # One sheet, three scopes — mirrors Rnote's export dialogs
+│   ├── ExportPrefs.kt            # Scope/format/options + page-range parsing (Rnote's prefs structs)
+│   ├── ExportLayout.kt           # Page rects, content bounds, page order, in document space
+│   ├── ExportCanvas.kt           # Draw target interface (android.graphics | SVG text)
+│   ├── ExportCanvases.kt         # The two ExportCanvas implementations
+│   ├── ExportPattern.kt          # Paper pattern at 1:1, anchored to the document origin
+│   ├── DocumentPainter.kt        # Paper + pattern + ink for one region — every format goes through it
+│   ├── DocumentExporter.kt       # Scope → files, incl. page-per-file into a SAF folder
 │   ├── SvgExporter.kt            # SVG vector export
-│   └── ImageExporter.kt          # PNG raster export
+│   ├── ImageExporter.kt          # PNG / JPEG raster export (bitmap scale, JPEG quality)
+│   └── PdfExporter.kt            # Paginated vector PDF via android.graphics.pdf
 └── bridge/
     └── RnoteNativeBridge.kt      # JNI stubs (prepared for future Rust FFI)
 ```
