@@ -29,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -319,6 +321,8 @@ class MainActivity : ComponentActivity() {
                 )
             }
             var viewportState by remember { mutableStateOf(ViewportState(displayScale = displayScale)) }
+            // The drawing area's own size, which the pan offset is measured against.
+            var canvasSize by remember { mutableStateOf(IntSize.Zero) }
             var showPageSettings by remember { mutableStateOf(false) }
             var showExportSheet by remember { mutableStateOf(false) }
             // Kept across openings so a second export doesn't start from the defaults again.
@@ -433,6 +437,16 @@ class MainActivity : ComponentActivity() {
                             documentTitle = documentTitle,
                             currentPage = pageGridLabel,
                             onResetZoom = { viewportState = ViewportState(displayScale = displayScale) },
+                            // Unlike the zoom reset next to it, this keeps the zoom and
+                            // only moves the view — see ViewportState.returnedToOrigin.
+                            onReturnToOrigin = {
+                                viewportState = viewportState.returnedToOrigin(
+                                    viewportWidthPx = canvasSize.width.toFloat(),
+                                    // Nothing to centre on when the document has no pages.
+                                    pageWidthPx = if (paperStyle.pageSize.isInfinite) 0f
+                                                  else paperStyle.effectivePageWidthPx
+                                )
+                            },
                             onTitleTap = {
                                 renameFieldValue = documentTitle
                                 showRenameDialog = true
@@ -493,6 +507,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
+                            .onSizeChanged { canvasSize = it }
                     ) {
                         DrawingCanvas(
                             toolConfig = toolConfig,

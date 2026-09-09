@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.MoreVert
@@ -51,6 +52,7 @@ fun RnoteTopBar(
     documentTitle: String,
     currentPage: String?,          // null in infinite mode; "col, row" in paged mode
     onResetZoom: () -> Unit,
+    onReturnToOrigin: () -> Unit,
     onTitleTap: () -> Unit,
     onToggleFingerDrawing: () -> Unit,
     onSaveDocument: () -> Unit,
@@ -114,6 +116,16 @@ fun RnoteTopBar(
                     imageVector = Icons.Default.TouchApp,
                     contentDescription = if (allowFingerDrawing) "Finger Drawing: ON" else "Finger Drawing: OFF",
                     tint = if (allowFingerDrawing) Color(0xFFC3E88D) else Color.Gray
+                )
+            }
+
+            // Desktop Rnote keeps this in its canvas menu, but being lost on a big
+            // canvas is a one-handed emergency on a tablet — it stays one tap away.
+            IconButton(onClick = onReturnToOrigin) {
+                Icon(
+                    imageVector = Icons.Default.FilterCenterFocus,
+                    contentDescription = "Return to Origin",
+                    tint = iconTint
                 )
             }
 

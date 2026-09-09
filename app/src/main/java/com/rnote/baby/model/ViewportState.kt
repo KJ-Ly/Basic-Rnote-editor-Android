@@ -43,6 +43,26 @@ data class ViewportState(
     }
 
     /**
+     * Desktop Rnote's `return_to_origin_page` (crates/rnote-ui/src/canvas/mod.rs): puts
+     * the origin page back in view at the zoom you are already working at, rather than
+     * throwing that zoom away the way a full reset does. Rnote centres the page across
+     * the viewport when it fits and goes to its left edge when it doesn't, which is what
+     * the two branches here are.
+     *
+     * [pageWidthPx] is the page width in canvas units, or zero for a document with no
+     * pages to centre — an unbounded canvas simply lands on its origin.
+     */
+    fun returnedToOrigin(viewportWidthPx: Float, pageWidthPx: Float): ViewportState {
+        val pageScreenWidth = pageWidthPx * effectiveScale
+        val x = if (pageWidthPx > 0f && pageScreenWidth + 2f * ORIGIN_MARGIN_PX <= viewportWidthPx) {
+            (viewportWidthPx - pageScreenWidth) / 2f
+        } else {
+            ORIGIN_MARGIN_PX
+        }
+        return copy(panOffset = Offset(x, ORIGIN_MARGIN_PX))
+    }
+
+    /**
      * Clamps and returns a new ViewportState with updated zoom and pan.
      */
     fun update(newPan: Offset, newZoom: Float): ViewportState {
@@ -57,6 +77,14 @@ data class ViewportState(
          */
         const val ZOOM_MIN = 0.2f
         const val ZOOM_MAX = 6.0f
+
+        /**
+         * Gap left between the origin and the corner of the screen by
+         * [returnedToOrigin]. Rnote's own overshoot is in document units and so grows
+         * with zoom; this one is screen-space, because a margin whose job is to keep the
+         * page off the edge of a phone should not become half the screen at 600%.
+         */
+        const val ORIGIN_MARGIN_PX = 24f
 
         /**
          * Physical scale of a display in device px per canvas unit.

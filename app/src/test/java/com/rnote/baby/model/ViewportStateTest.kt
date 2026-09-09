@@ -67,4 +67,46 @@ class ViewportStateTest {
     fun `a 96 dpi display draws one canvas unit per device pixel`() {
         assertEquals(1f, ViewportState.displayScaleFor(96f, 96f, 96), eps)
     }
+
+    @Test
+    fun `returning to origin centres a page that fits and keeps the zoom`() {
+        val viewport = ViewportState(
+            panOffset = Offset(-4000f, 9000f), zoomScale = 0.5f, displayScale = 2f
+        )
+        // 800 canvas units at an effective scale of 1.0 leaves 1200 of the 2000px wide
+        // viewport to split either side of the page.
+        val returned = viewport.returnedToOrigin(viewportWidthPx = 2000f, pageWidthPx = 800f)
+        assertOffsetEquals(Offset(600f, ViewportState.ORIGIN_MARGIN_PX), returned.panOffset)
+        assertEquals(0.5f, returned.zoomScale, eps)
+        assertEquals(2f, returned.displayScale, eps)
+    }
+
+    @Test
+    fun `returning to origin goes to the left edge of a page too wide to fit`() {
+        val viewport = ViewportState(panOffset = Offset(700f, -300f), zoomScale = 4f)
+        val returned = viewport.returnedToOrigin(viewportWidthPx = 1000f, pageWidthPx = 800f)
+        assertOffsetEquals(
+            Offset(ViewportState.ORIGIN_MARGIN_PX, ViewportState.ORIGIN_MARGIN_PX),
+            returned.panOffset
+        )
+    }
+
+    @Test
+    fun `a document with no pages just lands on its origin`() {
+        val returned = ViewportState(panOffset = Offset(-90f, -120f))
+            .returnedToOrigin(viewportWidthPx = 1000f, pageWidthPx = 0f)
+        assertOffsetEquals(
+            Offset(ViewportState.ORIGIN_MARGIN_PX, ViewportState.ORIGIN_MARGIN_PX),
+            returned.panOffset
+        )
+    }
+
+    @Test
+    fun `the origin is on screen after returning to it`() {
+        val returned = ViewportState(panOffset = Offset(-8000f, -8000f), zoomScale = 3f)
+            .returnedToOrigin(viewportWidthPx = 1400f, pageWidthPx = 800f)
+        val onScreen = returned.canvasToScreen(Offset.Zero)
+        assertEquals(ViewportState.ORIGIN_MARGIN_PX, onScreen.x, eps)
+        assertEquals(ViewportState.ORIGIN_MARGIN_PX, onScreen.y, eps)
+    }
 }
