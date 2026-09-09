@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -61,8 +64,6 @@ fun ColorPicker(
     onColorSelected: (Color) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showFullPalette by remember { mutableStateOf(false) }
-
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(28.dp),
@@ -91,18 +92,74 @@ fun ColorPicker(
 
             VerticalDivider(modifier = Modifier.height(32.dp), color = BrnaColors.PanelInactive)
 
-            BrnaColors.PenPalette.forEach { color ->
-                ColorSwatch(
-                    color = color,
-                    selected = activeColor == color,
-                    onClick = { onColorSelected(color) }
-                )
-            }
-
-            IconButton(onClick = { showFullPalette = true }, modifier = Modifier.size(32.dp)) {
-                Icon(GeneratedIcons.MoreColors, contentDescription = "More Colors", tint = BrnaColors.TextPrimaryOnPanel)
-            }
+            // The bar is wrap-content and sized to hold the palette in one line, so it
+            // takes the un-wrapped form; the sheet, which is narrow, takes the other.
+            PaletteQuickPicker(
+                activeColor = activeColor,
+                onColorSelected = onColorSelected,
+                wrap = false
+            )
         }
+    }
+}
+
+/**
+ * The palette every color in this app is picked from: the quick swatches, plus the
+ * button that opens the full GTK grid the stroke picker uses. Page Settings picks its
+ * background and pattern colors from the same one — desktop Rnote hands all three to
+ * the same GTK color chooser, and a page whose background can only be one of six greys
+ * chosen here would be a house palette that exists nowhere else in the app.
+ *
+ * [wrap] lays the swatches out in a [FlowRow] for a container too narrow to hold them
+ * in one line; the floating color bar is built around a single row and passes false.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PaletteQuickPicker(
+    activeColor: Color,
+    onColorSelected: (Color) -> Unit,
+    modifier: Modifier = Modifier,
+    wrap: Boolean = true,
+    swatchSize: Dp = 24.dp,
+    selectionRing: Color = Color.White,
+    moreColorsTint: Color = BrnaColors.TextPrimaryOnPanel
+) {
+    var showFullPalette by remember { mutableStateOf(false) }
+
+    val swatches: @Composable () -> Unit = {
+        BrnaColors.PenPalette.forEach { color ->
+            ColorSwatch(
+                color = color,
+                selected = activeColor == color,
+                size = swatchSize,
+                ringColor = selectionRing,
+                onClick = { onColorSelected(color) }
+            )
+        }
+        IconButton(
+            onClick = { showFullPalette = true },
+            modifier = Modifier.size(swatchSize + 8.dp)
+        ) {
+            Icon(
+                GeneratedIcons.MoreColors,
+                contentDescription = "More Colors",
+                tint = moreColorsTint
+            )
+        }
+    }
+
+    if (wrap) {
+        FlowRow(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) { swatches() }
+    } else {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) { swatches() }
     }
 
     if (showFullPalette) {
@@ -138,14 +195,20 @@ private fun ColorPad(
 }
 
 @Composable
-private fun ColorSwatch(color: Color, selected: Boolean, onClick: () -> Unit) {
+private fun ColorSwatch(
+    color: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    size: Dp = 24.dp,
+    ringColor: Color = Color.White
+) {
     Box(
         modifier = Modifier
-            .size(24.dp)
+            .size(size)
             .clip(CircleShape)
             .then(if (color == Color.Transparent) Modifier else Modifier.background(color))
             .then(
-                if (selected) Modifier.border(2.dp, Color.White, CircleShape)
+                if (selected) Modifier.border(2.dp, ringColor, CircleShape)
                 else Modifier
             )
             .clickable(onClick = onClick)

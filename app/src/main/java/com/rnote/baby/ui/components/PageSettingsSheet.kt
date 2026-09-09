@@ -1,10 +1,6 @@
 package com.rnote.baby.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -17,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -306,41 +302,24 @@ fun PageSettingsSheet(
             Spacer(modifier = Modifier.height(8.dp))
 
             val bgColor = paperStyle.currentBackgroundColor
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Quick-pick common bg colors
-                val presetBgColors = listOf(
-                    Color.White,
-                    Color(0xFFF7F9FC),
-                    Color(0xFFFFF8E1),  // warm cream
-                    Color(0xFF1E1E24),  // dark
-                    Color(0xFF2D2D3F),  // darker blue
-                    Color(0xFF1A1A2E)   // deep navy
-                )
-                presetBgColors.forEach { color ->
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .border(
-                                width = if (bgColor == color) 2.5.dp else 1.dp,
-                                color = if (bgColor == color) accent else onSurfaceDim.copy(alpha = 0.3f),
-                                shape = CircleShape
-                            )
-                            .clickable {
-                                onPaperStyleChanged(
-                                    paperStyle.copy(
-                                        customBackgroundColor = color,
-                                        isDarkMode = color.red < 0.5f && color.green < 0.5f && color.blue < 0.5f
-                                    )
-                                )
-                            }
+            PaletteQuickPicker(
+                activeColor = bgColor,
+                onColorSelected = { color ->
+                    onPaperStyleChanged(
+                        paperStyle.copy(
+                            customBackgroundColor = color,
+                            // The app's own light/dark chrome follows the paper it is
+                            // drawn against. A see-through page says nothing about that,
+                            // so it leaves the theme where it was.
+                            isDarkMode = if (color.alpha < 0.5f) paperStyle.isDarkMode
+                                         else color.luminance() < 0.5f
+                        )
                     )
-                }
-            }
+                },
+                swatchSize = 32.dp,
+                selectionRing = accent,
+                moreColorsTint = onSurface
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -380,35 +359,13 @@ fun PageSettingsSheet(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 val gridColor = paperStyle.currentGridColor
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    val presetGridColors = listOf(
-                        Color(0xFF383842),  // dark grid
-                        Color(0xFFE2E8F0),  // light grid
-                        Color(0xFFCCDAFF),  // soft blue
-                        Color(0xFF82AAFF),  // accent blue
-                        Color(0xFFDBA7A7),  // soft red
-                        Color(0xFFA7DBB8)   // soft green
-                    )
-                    presetGridColors.forEach { color ->
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(color)
-                                .border(
-                                    width = if (gridColor == color) 2.5.dp else 1.dp,
-                                    color = if (gridColor == color) accent else onSurfaceDim.copy(alpha = 0.3f),
-                                    shape = CircleShape
-                                )
-                                .clickable {
-                                    onPaperStyleChanged(paperStyle.copy(customGridColor = color))
-                                }
-                        )
-                    }
-                }
+                PaletteQuickPicker(
+                    activeColor = gridColor,
+                    onColorSelected = { onPaperStyleChanged(paperStyle.copy(customGridColor = it)) },
+                    swatchSize = 32.dp,
+                    selectionRing = accent,
+                    moreColorsTint = onSurface
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
