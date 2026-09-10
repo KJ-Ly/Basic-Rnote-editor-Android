@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Base64
 import com.rnote.baby.model.EllipseShape
-import com.rnote.baby.model.FreehandShape
 import com.rnote.baby.model.LayoutMode
 import com.rnote.baby.model.LineShape
 import com.rnote.baby.model.NativeBitmapElement
@@ -166,7 +165,11 @@ object RnoteNativeSerializer {
         var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
         var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
         for (el in elements) {
-            val pad = if (el is NativeBrushStroke) el.strokeWidth / 2f else 0f
+            val pad = when (el) {
+                is NativeBrushStroke   -> el.strokeWidth / 2f
+                is NativeShapeElement  -> el.strokeWidth / 2f
+                else                   -> 0f
+            }
             if (el.minX - pad < minX) minX = el.minX - pad
             if (el.minY - pad < minY) minY = el.minY - pad
             if (el.maxX + pad > maxX) maxX = el.maxX + pad
@@ -284,12 +287,15 @@ object RnoteNativeSerializer {
     private fun StringBuilder.appendSmoothStyle(
         color: RnoteNativeColor,
         strokeWidth: Float,
-        pressureCurve: PressureCurve = PressureCurve.DEFAULT
+        pressureCurve: PressureCurve = PressureCurve.DEFAULT,
+        // Transparent for a brush stroke, which has nothing to fill; a shape passes its
+        // own, which used to be written away and left desktop's filled shapes hollow.
+        fillColor: RnoteNativeColor = RnoteNativeColor.TRANSPARENT
     ) {
         append("""{"smooth":{""")
         append(""""stroke_color":${color.toJson()},""")
         append(""""stroke_width":$strokeWidth,""")
-        append(""""fill_color":{"r":0.0,"g":0.0,"b":0.0,"a":0.0},""")
+        append(""""fill_color":${fillColor.toJson()},""")
         // Hard-coding "linear" here made every Marker stroke taper with pressure in
         // desktop Rnote, which defines its Marker brush as PressureCurve::Const.
         append(""""pressure_curve":"${pressureCurve.apiName}",""")
@@ -304,12 +310,17 @@ object RnoteNativeSerializer {
         val tf = el.transform
         append("""{"textstroke":{""")
         append(""""text":${jsonString(el.text)},""")
-        append(""""transform":{"matrix":[${tf.joinToString(",")}]},""")
+        append(""""transform":""")
+        appendAffine(tf)
+        append(",")
         append(""""text_style":{""")
         append(""""font_family":${jsonString(el.fontFamily)},""")
         append(""""font_size":${el.fontSize},""")
         append(""""color":${el.color.toJson()}""")
-        append("""}}}}""")
+        // Three: text_style, textstroke, and the element object. The fourth that used to
+        // be here made every file holding a text box invalid JSON, which nothing caught
+        // because nothing round-tripped a text element until now.
+        append("""}}}""")
     }
 
     // ── BitmapElement ─────────────────────────────────────────────────────────
@@ -326,7 +337,9 @@ object RnoteNativeSerializer {
         val tf = el.transform
         append("""{"bitmapimage":{""")
         append(""""image_data":${jsonString(b64)},""")
-        append(""""transform":{"matrix":[${tf.joinToString(",")}]},""")
+        append(""""transform":""")
+        appendAffine(tf)
+        append(",")
         append(""""bounds":{""")
         append(""""mins":[${el.minX},${el.minY}],"maxs":[${el.maxX},${el.maxY}]""")
         append("}}}")
@@ -334,20 +347,37 @@ object RnoteNativeSerializer {
 
     // ── ShapeElement ──────────────────────────────────────────────────────────
 
+    /**
+     * The mirror of `parseShapeStroke`: lower-case variant names, rect and ellipse
+     * carrying their transform. A shape only ever gets here because it was read from a
+     * file under the same name, so the two stay in step by construction.
+     */
     private fun StringBuilder.appendShapeElement(el: NativeShapeElement) {
         append("""{"shapestroke":{"shape":{""")
         when (val s = el.shape) {
-            is LineShape    -> append(""""Line":{"start":[${s.x1},${s.y1}],"end":[${s.x2},${s.y2}]}""")
-            is RectShape    -> append(""""Rectangle":{"top_left":[${s.x},${s.y}],"size":[${s.w},${s.h}]}""")
-            is EllipseShape -> append(""""Ellipse":{"center":[${s.cx},${s.cy}],"radii":[${s.rx},${s.ry}]}""")
-            is FreehandShape -> {
-                append(""""FreehandPen":""")
-                appendPenPath(s.points)
+            is LineShape    -> append(""""line":{"start":[${s.x1},${s.y1}],"end":[${s.x2},${s.y2}]}""")
+            is RectShape    -> {
+                append(""""rect":{"cuboid":{"half_extents":[${s.halfExtentX},${s.halfExtentY}]},"transform":""")
+                appendAffine(s.transform)
+                append("}")
+            }
+            is EllipseShape -> {
+                append(""""ellipse":{"radii":[${s.radiusX},${s.radiusY}],"transform":""")
+                appendAffine(s.transform)
+                append("}")
             }
         }
         append("""},"style":""")
-        appendSmoothStyle(el.color, el.strokeWidth)
+        appendSmoothStyle(el.color, el.strokeWidth, fillColor = el.fillColor)
         append("}}")
+    }
+
+    /**
+     * Rnote's transform: a column-major 3x3 as nine floats. Ours is the six that can
+     * differ, so the third column and the bottom row are filled back in here.
+     */
+    private fun StringBuilder.appendAffine(t: FloatArray) {
+        append("""{"affine":[${t[0]},${t[1]},0.0,${t[2]},${t[3]},0.0,${t[4]},${t[5]},1.0]}""")
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

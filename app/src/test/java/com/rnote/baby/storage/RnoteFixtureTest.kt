@@ -1,6 +1,9 @@
 package com.rnote.baby.storage
 
+import com.rnote.baby.model.LineShape
 import com.rnote.baby.model.NativeBrushStroke
+import com.rnote.baby.model.NativeShapeElement
+import com.rnote.baby.model.RectShape
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -117,8 +120,47 @@ class RnoteFixtureTest {
         assertTrue("collapsed to its endpoints", longest.maxY - longest.minY > 100f)
     }
 
+    @Test
+    fun `shapes drawn in desktop survive being read and written back`() {
+        // H3.rnote holds two brush strokes, a line, and a rect filled with a pale blue.
+        // Every shape in it used to be dropped at parse: the variant names this reader
+        // matched were the ones an older Rnote wrote, so nothing matched and a desktop
+        // document lost its shapes the first time it was saved from here.
+        val doc = parseFixture(SHAPE_FIXTURE_NAME)
+        val shapes = doc.elements.filterIsInstance<NativeShapeElement>()
+        assertEquals(2, shapes.size)
+
+        val line = shapes.map { it.shape }.filterIsInstance<LineShape>().single()
+        assertEquals(145.115f, line.x1, 1e-2f)
+        assertEquals(570.079f, line.y1, 1e-2f)
+
+        val rect = shapes.single { it.shape is RectShape }
+        val kind = rect.shape as RectShape
+        assertEquals(17.808f, kind.halfExtentX, 1e-2f)
+        assertEquals(16.471f, kind.halfExtentY, 1e-2f)
+        // The transform is where the rect actually sits — it carries no corner.
+        assertEquals(208.542f, kind.transform[4], 1e-2f)
+        assertEquals(61.537f, kind.transform[5], 1e-2f)
+        assertEquals(1f, rect.fillColor.a, 1e-3f)
+        assertEquals(0.597f, rect.fillColor.r, 1e-2f)
+        // Bounds come out of the transform, and the extent maths depends on them.
+        assertEquals(208.542f - 17.808f, rect.minX, 1e-2f)
+        assertEquals(61.537f + 16.471f, rect.maxY, 1e-2f)
+
+        val bytes = ByteArrayOutputStream()
+            .also { RnoteNativeSerializer.serialize(it, doc) }
+            .toByteArray()
+        val reparsed = RnoteNativeParser.parse(ByteArrayInputStream(bytes))
+        val rewritten = reparsed.elements.filterIsInstance<NativeShapeElement>()
+        assertEquals(2, rewritten.size)
+        val rewrittenRect = rewritten.single { it.shape is RectShape }
+        assertEquals(kind.halfExtentX, (rewrittenRect.shape as RectShape).halfExtentX, 1e-3f)
+        assertEquals(rect.fillColor.r, rewrittenRect.fillColor.r, 1e-3f)
+    }
+
     private companion object {
         const val FIXTURE_NAME = "test.rnote"
         const val CURVE_FIXTURE_NAME = "L2b.rnote"
+        const val SHAPE_FIXTURE_NAME = "H3.rnote"
     }
 }

@@ -9,6 +9,8 @@ data class RnoteNativeColor(val r: Float, val g: Float, val b: Float, val a: Flo
     companion object {
         val BLACK = RnoteNativeColor(0f, 0f, 0f, 1f)
         val WHITE = RnoteNativeColor(1f, 1f, 1f, 1f)
+        /** Rnote's "no fill" — the value its own writer puts on an unfilled shape. */
+        val TRANSPARENT = RnoteNativeColor(0f, 0f, 0f, 0f)
     }
 }
 
@@ -69,19 +71,43 @@ data class NativeBitmapElement(
     override val maxX: Float, override val maxY: Float
 ) : NativeCanvasElement()
 
-/** Geometric shape — line, rectangle, ellipse, freehand quadratic. */
+/**
+ * Geometric shape, held the way Rnote holds it (`rnote-compose/src/shapes`) rather than
+ * as an axis-aligned box of our own: a rect is half-extents about a *transformed* centre,
+ * an ellipse is radii about one. Storing them as a plain x/y/w/h — which is what this
+ * app used to do — cannot hold a shape the desktop rotated, and re-saving would have
+ * silently squared it up.
+ *
+ * There is no freehand kind: older files have one, and it is read as the brush stroke it
+ * effectively is, so that everything held here is a shape this app can also write back.
+ */
 sealed class NativeShapeKind
+
+/** A line carries its endpoints outright, with no transform of its own. */
 data class LineShape(val x1: Float, val y1: Float, val x2: Float, val y2: Float) : NativeShapeKind()
-data class RectShape(val x: Float, val y: Float, val w: Float, val h: Float) : NativeShapeKind()
-data class EllipseShape(val cx: Float, val cy: Float, val rx: Float, val ry: Float) : NativeShapeKind()
-data class FreehandShape(val points: List<NativeStrokePoint>) : NativeShapeKind()
+
+data class RectShape(
+    val halfExtentX: Float,
+    val halfExtentY: Float,
+    /** Column-major 2D affine, as [NativeTextElement.transform]. Centres the rect. */
+    val transform: FloatArray = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
+) : NativeShapeKind()
+
+data class EllipseShape(
+    val radiusX: Float,
+    val radiusY: Float,
+    /** Column-major 2D affine, as [NativeTextElement.transform]. Centres the ellipse. */
+    val transform: FloatArray = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
+) : NativeShapeKind()
 
 data class NativeShapeElement(
     val shape: NativeShapeKind,
     val color: RnoteNativeColor,
     val strokeWidth: Float,
     override val minX: Float, override val minY: Float,
-    override val maxX: Float, override val maxY: Float
+    override val maxX: Float, override val maxY: Float,
+    /** A shape can be filled; a brush stroke can't. Dropping this emptied filled shapes. */
+    val fillColor: RnoteNativeColor = RnoteNativeColor.TRANSPARENT
 ) : NativeCanvasElement()
 
 // ── Document ──────────────────────────────────────────────────────────────────

@@ -1,7 +1,11 @@
 package com.rnote.baby.storage
 
 import com.rnote.baby.model.NativeBackgroundConfig
+import com.rnote.baby.model.EllipseShape
+import com.rnote.baby.model.LineShape
 import com.rnote.baby.model.NativeBrushStroke
+import com.rnote.baby.model.NativeShapeElement
+import com.rnote.baby.model.RectShape
 import com.rnote.baby.model.NativePatternType
 import com.rnote.baby.model.NativeStrokePoint
 import com.rnote.baby.model.PressureCurve
@@ -70,6 +74,76 @@ class RnoteNativeRoundTripTest {
         showBorders = false,
         showOriginIndicator = true
     )
+
+    @Test
+    fun `a rotated rectangle keeps its rotation`() {
+        // The old model was an axis-aligned x/y/w/h, so a shape the desktop had turned
+        // came back square. Half a right angle, scaled, and moved off the origin.
+        val c = kotlin.math.cos(0.7853982f)
+        val s = kotlin.math.sin(0.7853982f)
+        val transform = floatArrayOf(c, s, -s, c, 300f, 200f)
+        val rect = NativeShapeElement(
+            shape = RectShape(40f, 20f, transform),
+            color = RnoteNativeColor(0.1f, 0.2f, 0.3f, 1f),
+            strokeWidth = 3f,
+            minX = 0f, minY = 0f, maxX = 0f, maxY = 0f,
+            fillColor = RnoteNativeColor(0.9f, 0.5f, 0.1f, 0.75f)
+        )
+        val parsed = roundTrip(docWith().copy(elements = listOf(rect)))
+            .elements.filterIsInstance<NativeShapeElement>().single()
+        val kind = parsed.shape as RectShape
+        assertEquals(40f, kind.halfExtentX, eps)
+        assertEquals(20f, kind.halfExtentY, eps)
+        transform.forEachIndexed { i, v -> assertEquals(v, kind.transform[i], eps) }
+        assertEquals(0.75f, parsed.fillColor.a, eps)
+        assertEquals(0.9f, parsed.fillColor.r, eps)
+        assertEquals(3f, parsed.strokeWidth, eps)
+        // Bounds are recomputed from the turned shape, not from its unturned extents.
+        assertTrue("a turned rect is wider than its half-extent", parsed.maxX - parsed.minX > 80f)
+    }
+
+    @Test
+    fun `an ellipse and a line survive a round trip`() {
+        val ellipse = NativeShapeElement(
+            shape = EllipseShape(50f, 25f, floatArrayOf(1f, 0f, 0f, 1f, 120f, 90f)),
+            color = RnoteNativeColor.BLACK, strokeWidth = 2f,
+            minX = 0f, minY = 0f, maxX = 0f, maxY = 0f
+        )
+        val line = NativeShapeElement(
+            shape = LineShape(10f, 20f, 300f, 400f),
+            color = RnoteNativeColor.BLACK, strokeWidth = 2f,
+            minX = 0f, minY = 0f, maxX = 0f, maxY = 0f
+        )
+        val parsed = roundTrip(docWith().copy(elements = listOf(ellipse, line)))
+            .elements.filterIsInstance<NativeShapeElement>()
+        assertEquals(2, parsed.size)
+
+        val e = parsed.map { it.shape }.filterIsInstance<EllipseShape>().single()
+        assertEquals(50f, e.radiusX, eps)
+        assertEquals(25f, e.radiusY, eps)
+        assertEquals(120f, e.transform[4], eps)
+
+        val l = parsed.map { it.shape }.filterIsInstance<LineShape>().single()
+        assertEquals(10f, l.x1, eps)
+        assertEquals(400f, l.y2, eps)
+    }
+
+    @Test
+    fun `a text box keeps the transform it was placed with`() {
+        // Rnote writes the transform as a nine-float affine; this reader only knew a
+        // six-float "matrix", so every transform silently became the identity and a
+        // rotated, scaled text box came back square at the origin.
+        val transform = floatArrayOf(1.5f, 0.25f, -0.25f, 1.5f, 640f, 480f)
+        val text = com.rnote.baby.model.NativeTextElement(
+            text = "Marginalia", fontFamily = "Cantarell", fontSize = 18f,
+            color = RnoteNativeColor(0.2f, 0.2f, 0.2f, 1f), transform = transform,
+            minX = 640f, minY = 480f, maxX = 820f, maxY = 498f
+        )
+        val parsed = roundTrip(docWith().copy(elements = listOf(text)))
+            .elements.filterIsInstance<com.rnote.baby.model.NativeTextElement>().single()
+        assertEquals("Marginalia", parsed.text)
+        transform.forEachIndexed { i, v -> assertEquals(v, parsed.transform[i], eps) }
+    }
 
     @Test
     fun `the output is gzipped, as desktop Rnote expects`() {
@@ -277,6 +351,99 @@ class RnoteNativeRoundTripTest {
         assertEquals(false, format.getBoolean("show_borders"))
         assertEquals(true, format.getBoolean("show_origin_indicator"))
         assertEquals(0.45, format.getJSONObject("border_color").getDouble("b"), 1e-3)
+    }
+
+    @Test
+    fun `every element kind we can write is strict, well-formed JSON`() {
+        // The strictness check above only ever held a brush stroke, which is how
+        // appendTextElement shipped a stray closing brace: a file with a text box in it
+        // was invalid JSON outright, so desktop would have refused the whole document,
+        // not just the text. Every kind the writer can emit belongs in this check.
+        val doc = docWith().copy(
+            elements = listOf(
+                brushStroke(listOf(NativeStrokePoint(0f, 0f, 1f), NativeStrokePoint(5f, 5f, 0.5f))),
+                com.rnote.baby.model.NativeTextElement(
+                    text = "A note in the margin", fontFamily = "Cantarell", fontSize = 16f,
+                    color = RnoteNativeColor.BLACK,
+                    transform = floatArrayOf(1f, 0f, 0f, 1f, 40f, 60f),
+                    minX = 40f, minY = 60f, maxX = 200f, maxY = 76f
+                ),
+                NativeShapeElement(
+                    shape = RectShape(30f, 15f, floatArrayOf(1f, 0f, 0f, 1f, 90f, 120f)),
+                    color = RnoteNativeColor.BLACK, strokeWidth = 2f,
+                    minX = 60f, minY = 105f, maxX = 120f, maxY = 135f,
+                    fillColor = RnoteNativeColor(0.6f, 0.75f, 0.94f, 1f)
+                )
+            )
+        )
+        val bytes = ByteArrayOutputStream()
+            .also { RnoteNativeSerializer.serialize(it, doc) }
+            .toByteArray()
+        val text = java.util.zip.GZIPInputStream(ByteArrayInputStream(bytes))
+            .bufferedReader(Charsets.UTF_8).readText()
+
+        val components = org.json.JSONObject(text)
+            .getJSONObject("data")
+            .getJSONObject("engine_snapshot")
+            .getJSONArray("stroke_components")
+        // The reserved sentinel slot, then one entry per element.
+        assertEquals(4, components.length())
+
+        val shape = components.getJSONObject(3).getJSONObject("value").getJSONObject("shapestroke")
+        val rect = shape.getJSONObject("shape").getJSONObject("rect")
+        assertEquals(30.0, rect.getJSONObject("cuboid").getJSONArray("half_extents").getDouble(0), 1e-3)
+        // Nine floats, column-major, translation in the third column.
+        val affine = rect.getJSONObject("transform").getJSONArray("affine")
+        assertEquals(9, affine.length())
+        assertEquals(90.0, affine.getDouble(6), 1e-3)
+        assertEquals(120.0, affine.getDouble(7), 1e-3)
+        assertEquals(
+            0.6,
+            shape.getJSONObject("style").getJSONObject("smooth")
+                .getJSONObject("fill_color").getDouble("r"),
+            1e-3
+        )
+
+        val textStroke = components.getJSONObject(2).getJSONObject("value").getJSONObject("textstroke")
+        assertEquals("A note in the margin", textStroke.getString("text"))
+        assertEquals(
+            40.0,
+            textStroke.getJSONObject("transform").getJSONArray("affine").getDouble(6),
+            1e-3
+        )
+    }
+
+    @Test
+    fun `shapes from an older Rnote still read, in the shape the model holds now`() {
+        // The capitalised variants and the corner-and-size rectangle an older Rnote
+        // wrote. A freehand "shape" has no 0.14 form to be written back as, so it is
+        // read as the brush stroke it effectively is.
+        val parsed = parseJson(
+            """{"data":{"engine_snapshot":{"document":{"config":{}},"stroke_components":[""" +
+            """{"value":null,"version":0},""" +
+            """{"value":{"shapestroke":{"shape":{"Rectangle":{"top_left":[10.0,20.0],""" +
+            """"size":[100.0,50.0]}},"style":{"Smooth":{"stroke_width":4.0}}}},"version":1},""" +
+            """{"value":{"shapestroke":{"shape":{"FreehandPen":{"start":""" +
+            """{"pos":[1.0,2.0],"pressure":0.5},"segments":[{"lineto":{"end":""" +
+            """{"pos":[9.0,12.0],"pressure":0.5}}}]}},"style":{"Smooth":{"stroke_width":3.0}}}},""" +
+            """"version":1}]}}}"""
+        )
+
+        val rect = parsed.elements.filterIsInstance<NativeShapeElement>().single()
+        val kind = rect.shape as RectShape
+        assertEquals(50f, kind.halfExtentX, eps)
+        assertEquals(25f, kind.halfExtentY, eps)
+        // Re-centred: a corner at (10,20) with a 100x50 size sits centred on (60,45).
+        assertEquals(60f, kind.transform[4], eps)
+        assertEquals(45f, kind.transform[5], eps)
+        assertEquals(4f, rect.strokeWidth, eps)
+        assertEquals(10f, rect.minX, eps)
+        assertEquals(70f, rect.maxY, eps)
+
+        val freehand = parsed.elements.filterIsInstance<NativeBrushStroke>().single()
+        assertEquals(2, freehand.points.size)
+        assertEquals(3f, freehand.strokeWidth, eps)
+        assertEquals(9f, freehand.maxX, eps)
     }
 
     @Test

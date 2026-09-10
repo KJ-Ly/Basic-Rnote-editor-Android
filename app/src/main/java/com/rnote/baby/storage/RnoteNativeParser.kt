@@ -7,7 +7,6 @@ import android.util.Base64
 import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonToken
 import com.rnote.baby.model.EllipseShape
-import com.rnote.baby.model.FreehandShape
 import com.rnote.baby.model.LineShape
 import com.rnote.baby.model.NativeBackgroundConfig
 import com.rnote.baby.model.NativeBitmapElement
@@ -24,6 +23,7 @@ import com.rnote.baby.model.RnoteNativeDocument
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.zip.GZIPInputStream
+import kotlin.math.sqrt
 
 /**
  * Streaming parser for .rnote files (GZIP-compressed JSON).
@@ -471,9 +471,22 @@ object RnoteNativeParser {
 
     // ── ShapeStroke ───────────────────────────────────────────────────────────
 
-    private fun parseShapeStroke(reader: JsonReader): NativeShapeElement? {
+    /**
+     * Rnote 0.14 names its shape variants and its style in lower case - `line`, `rect`,
+     * `ellipse`, `smooth` - and gives rect and ellipse a transform rather than a corner.
+     * This matched `"Line"`, `"Rectangle"`, `"Smooth"` and so on instead, which no file
+     * from that version contains, so every shape fell through to a null and was dropped:
+     * a desktop document's shapes vanished on the first save from here, filled or not.
+     * The capitalised forms stay as a legacy branch for whatever older files still have.
+     */
+    private fun parseShapeStroke(reader: JsonReader): NativeCanvasElement? {
         var shape: com.rnote.baby.model.NativeShapeKind? = null
+        // A legacy freehand "shape" is a path with a width and a colour, which is a brush
+        // stroke in everything but name — and unlike a guessed-at polyline variant, a
+        // brush stroke is something this app knows how to write back.
+        var freehandPoints: List<NativeStrokePoint>? = null
         var color = RnoteNativeColor.BLACK
+        var fill = RnoteNativeColor.TRANSPARENT
         var width = 2f
 
         reader.beginObject()
@@ -482,51 +495,16 @@ object RnoteNativeParser {
                 "shape" -> {
                     reader.beginObject()
                     while (reader.hasNext()) {
-                        when (val shapeName = reader.nextName()) {
-                            "Line" -> {
-                                var x1 = 0f; var y1 = 0f; var x2 = 0f; var y2 = 0f
-                                reader.beginObject()
-                                while (reader.hasNext()) {
-                                    when (reader.nextName()) {
-                                        "start" -> { reader.beginArray(); x1 = reader.nextDouble().toFloat(); y1 = reader.nextDouble().toFloat(); reader.endArray() }
-                                        "end"   -> { reader.beginArray(); x2 = reader.nextDouble().toFloat(); y2 = reader.nextDouble().toFloat(); reader.endArray() }
-                                        else    -> reader.skipValue()
-                                    }
-                                }
-                                reader.endObject()
-                                shape = LineShape(x1, y1, x2, y2)
-                            }
-                            "Rectangle" -> {
-                                var x = 0f; var y = 0f; var w = 0f; var h = 0f
-                                reader.beginObject()
-                                while (reader.hasNext()) {
-                                    when (reader.nextName()) {
-                                        "top_left" -> { reader.beginArray(); x = reader.nextDouble().toFloat(); y = reader.nextDouble().toFloat(); reader.endArray() }
-                                        "size"     -> { reader.beginArray(); w = reader.nextDouble().toFloat(); h = reader.nextDouble().toFloat(); reader.endArray() }
-                                        else       -> reader.skipValue()
-                                    }
-                                }
-                                reader.endObject()
-                                shape = RectShape(x, y, w, h)
-                            }
-                            "Ellipse" -> {
-                                var cx = 0f; var cy = 0f; var rx = 0f; var ry = 0f
-                                reader.beginObject()
-                                while (reader.hasNext()) {
-                                    when (reader.nextName()) {
-                                        "center" -> { reader.beginArray(); cx = reader.nextDouble().toFloat(); cy = reader.nextDouble().toFloat(); reader.endArray() }
-                                        "radii"  -> { reader.beginArray(); rx = reader.nextDouble().toFloat(); ry = reader.nextDouble().toFloat(); reader.endArray() }
-                                        else     -> reader.skipValue()
-                                    }
-                                }
-                                reader.endObject()
-                                shape = EllipseShape(cx, cy, rx, ry)
-                            }
-                            "FreehandPen", "Freehand" -> {
-                                val pts = parsePath(reader)
-                                shape = FreehandShape(pts)
-                            }
-                            else -> reader.skipValue()
+                        when (reader.nextName()) {
+                            "line", "Line" -> shape = parseLineShape(reader)
+                            "rect"         -> shape = parseRectShape(reader)
+                            "ellipse"      -> shape = parseEllipseShape(reader)
+                            // Legacy corner-and-size forms, re-centred into the
+                            // half-extents and radii the model now carries.
+                            "Rectangle"    -> shape = parseLegacyRectShape(reader)
+                            "Ellipse"      -> shape = parseLegacyEllipseShape(reader)
+                            "FreehandPen", "Freehand" -> freehandPoints = parsePath(reader)
+                            else           -> reader.skipValue()
                         }
                     }
                     reader.endObject()
@@ -535,11 +513,12 @@ object RnoteNativeParser {
                     reader.beginObject()
                     while (reader.hasNext()) {
                         when (reader.nextName()) {
-                            "Smooth", "Rough" -> {
+                            "smooth", "rough", "Smooth", "Rough" -> {
                                 reader.beginObject()
                                 while (reader.hasNext()) {
                                     when (reader.nextName()) {
                                         "stroke_color" -> color = parseColor(reader)
+                                        "fill_color"   -> fill  = parseColor(reader)
                                         "stroke_width" -> width = reader.nextDouble().toFloat()
                                         else           -> reader.skipValue()
                                     }
@@ -556,21 +535,137 @@ object RnoteNativeParser {
         }
         reader.endObject()
 
+        freehandPoints?.let { pts ->
+            if (pts.isEmpty()) return null
+            return NativeBrushStroke(
+                pts, width, color, false,
+                pts.minOf { it.x }, pts.minOf { it.y }, pts.maxOf { it.x }, pts.maxOf { it.y }
+            )
+        }
         val s = shape ?: return null
         val (mnX, mnY, mxX, mxY) = boundsForShape(s)
-        return NativeShapeElement(s, color, width, mnX, mnY, mxX, mxY)
+        return NativeShapeElement(s, color, width, mnX, mnY, mxX, mxY, fill)
     }
 
+    private fun parseLineShape(reader: JsonReader): LineShape {
+        var x1 = 0f; var y1 = 0f; var x2 = 0f; var y2 = 0f
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "start" -> { reader.beginArray(); x1 = reader.nextDouble().toFloat(); y1 = reader.nextDouble().toFloat(); reader.endArray() }
+                "end"   -> { reader.beginArray(); x2 = reader.nextDouble().toFloat(); y2 = reader.nextDouble().toFloat(); reader.endArray() }
+                else    -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return LineShape(x1, y1, x2, y2)
+    }
+
+    /** `{"cuboid":{"half_extents":[hx,hy]},"transform":{"affine":[..]}}` */
+    private fun parseRectShape(reader: JsonReader): RectShape {
+        var hx = 0f; var hy = 0f
+        val transform = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "cuboid" -> {
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        when (reader.nextName()) {
+                            "half_extents" -> { reader.beginArray(); hx = reader.nextDouble().toFloat(); hy = reader.nextDouble().toFloat(); reader.endArray() }
+                            else -> reader.skipValue()
+                        }
+                    }
+                    reader.endObject()
+                }
+                "transform" -> parseTransformInto(reader, transform)
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return RectShape(hx, hy, transform)
+    }
+
+    /** `{"radii":[rx,ry],"transform":{"affine":[..]}}` */
+    private fun parseEllipseShape(reader: JsonReader): EllipseShape {
+        var rx = 0f; var ry = 0f
+        val transform = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "radii"     -> { reader.beginArray(); rx = reader.nextDouble().toFloat(); ry = reader.nextDouble().toFloat(); reader.endArray() }
+                "transform" -> parseTransformInto(reader, transform)
+                else        -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return EllipseShape(rx, ry, transform)
+    }
+
+    private fun parseLegacyRectShape(reader: JsonReader): RectShape {
+        var x = 0f; var y = 0f; var w = 0f; var h = 0f
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "top_left" -> { reader.beginArray(); x = reader.nextDouble().toFloat(); y = reader.nextDouble().toFloat(); reader.endArray() }
+                "size"     -> { reader.beginArray(); w = reader.nextDouble().toFloat(); h = reader.nextDouble().toFloat(); reader.endArray() }
+                else       -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return RectShape(w / 2f, h / 2f, floatArrayOf(1f, 0f, 0f, 1f, x + w / 2f, y + h / 2f))
+    }
+
+    private fun parseLegacyEllipseShape(reader: JsonReader): EllipseShape {
+        var cx = 0f; var cy = 0f; var rx = 0f; var ry = 0f
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "center" -> { reader.beginArray(); cx = reader.nextDouble().toFloat(); cy = reader.nextDouble().toFloat(); reader.endArray() }
+                "radii"  -> { reader.beginArray(); rx = reader.nextDouble().toFloat(); ry = reader.nextDouble().toFloat(); reader.endArray() }
+                else     -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return EllipseShape(rx, ry, floatArrayOf(1f, 0f, 0f, 1f, cx, cy))
+    }
+
+    /**
+     * Axis-aligned bounds of a shape with its transform applied. The document extent is
+     * derived from these, so a rotated rect has to report the box it actually occupies
+     * rather than the one it would occupy sitting square.
+     */
     private fun boundsForShape(s: com.rnote.baby.model.NativeShapeKind): FloatArray = when (s) {
-        is LineShape     -> floatArrayOf(minOf(s.x1,s.x2), minOf(s.y1,s.y2), maxOf(s.x1,s.x2), maxOf(s.y1,s.y2))
-        is RectShape     -> floatArrayOf(s.x, s.y, s.x + s.w, s.y + s.h)
-        is EllipseShape  -> floatArrayOf(s.cx - s.rx, s.cy - s.ry, s.cx + s.rx, s.cy + s.ry)
-        is FreehandShape -> {
-            val pts = s.points
-            if (pts.isEmpty()) floatArrayOf(0f,0f,0f,0f)
-            else floatArrayOf(pts.minOf{it.x}, pts.minOf{it.y}, pts.maxOf{it.x}, pts.maxOf{it.y})
+        is LineShape -> floatArrayOf(minOf(s.x1, s.x2), minOf(s.y1, s.y2), maxOf(s.x1, s.x2), maxOf(s.y1, s.y2))
+        is RectShape -> {
+            val t = s.transform
+            var mnX = Float.MAX_VALUE; var mnY = Float.MAX_VALUE
+            var mxX = -Float.MAX_VALUE; var mxY = -Float.MAX_VALUE
+            for (sx in intArrayOf(-1, 1)) {
+                for (sy in intArrayOf(-1, 1)) {
+                    val cx = sx * s.halfExtentX
+                    val cy = sy * s.halfExtentY
+                    val x = t[0] * cx + t[2] * cy + t[4]
+                    val y = t[1] * cx + t[3] * cy + t[5]
+                    if (x < mnX) mnX = x
+                    if (x > mxX) mxX = x
+                    if (y < mnY) mnY = y
+                    if (y > mxY) mxY = y
+                }
+            }
+            floatArrayOf(mnX, mnY, mxX, mxY)
+        }
+        is EllipseShape -> {
+            // Exact half-extent of a transformed ellipse: the length of the image of the
+            // radius vector, which is inside the corner of the transformed bounding box.
+            val t = s.transform
+            val hw = sqrt(sq(t[0] * s.radiusX) + sq(t[2] * s.radiusY))
+            val hh = sqrt(sq(t[1] * s.radiusX) + sq(t[3] * s.radiusY))
+            floatArrayOf(t[4] - hw, t[5] - hh, t[4] + hw, t[5] + hh)
         }
     }
+
+    private fun sq(v: Float): Float = v * v
 
     // ── chrono_components ─────────────────────────────────────────────────────
 
@@ -688,6 +783,19 @@ object RnoteNativeParser {
         reader.beginObject()
         while (reader.hasNext()) {
             when (reader.nextName()) {
+                // What Rnote 0.14 actually writes: a column-major 3x3 as nine floats,
+                // [a,b,0, c,d,0, tx,ty,1]. Only "matrix" was read before, so every
+                // transform fell back to identity and a desktop text box or image came
+                // in unrotated, unscaled, and at the origin.
+                "affine" -> {
+                    val m = FloatArray(9)
+                    reader.beginArray()
+                    for (i in 0..8) { if (reader.hasNext()) m[i] = reader.nextDouble().toFloat() }
+                    reader.endArray()
+                    out[0] = m[0]; out[1] = m[1]   // first column
+                    out[2] = m[3]; out[3] = m[4]   // second column
+                    out[4] = m[6]; out[5] = m[7]   // translation
+                }
                 "matrix" -> {
                     reader.beginArray()
                     for (i in 0..5) { if (reader.hasNext()) out[i] = reader.nextDouble().toFloat() }
