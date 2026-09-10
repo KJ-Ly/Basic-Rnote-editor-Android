@@ -166,8 +166,8 @@ always welcome.
 - **[rnoteviewer-android](https://github.com/Intranox/rnoteviewer-android)** by
   Intranox — this project's `.rnote` parser was ported and adapted from theirs.
   Working out how to stream the format is the hard part of reading it, and that
-  groundwork was theirs. (See the licensing note in
-  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).)
+  groundwork was theirs — done and shared freely with an invitation to adapt it.
+  (See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the details.)
 
 ## License
 

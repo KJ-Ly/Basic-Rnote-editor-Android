@@ -70,13 +70,17 @@ no counterpart upstream — rnoteviewer-android only reads `.rnote` files — as
 does the round-trip fidelity work that goes with it, along with this project's
 rendering, export, and editing layers.
 
-> **Licensing status — unresolved.** As of 2026-09-09 the rnoteviewer-android
-> repository publishes no LICENSE file, which under default copyright terms
-> means all rights are reserved and no permission to reuse the code has been
-> granted. This project has not obtained that permission. The attribution above
-> is offered in good faith and is not a substitute for it. Resolving this —
-> by asking Intranox to license the work, or by replacing the derived code —
-> is a prerequisite to distributing this project.
+**Permission.** rnoteviewer-android publishes no LICENSE file, but its README
+grants reuse in as many words:
+
+> "If you find this project useful: Feel free to fork it, Improve it, Adapt it
+> to your needs. Contributions are welcome, but there is no guarantee of review
+> or updates."
+
+Adapting the parser is exactly what that permits, and this project relies on
+that grant. It is informal rather than a named license, so it does not spell out
+redistribution or sublicensing terms the way MIT or GPL-3.0 would. Intranox is
+welcome to get in touch if any of this misrepresents their intent.
 
 ## Scope
 
