@@ -8,6 +8,10 @@ that matter for interoperability (the v0.14 document schema, stroke geometry,
 paper patterns, page layout) in pure Kotlin, so that a file drawn on the desktop
 opens on a tablet and a file drawn on the tablet opens back on the desktop.
 
+*Currently* is the operative word: the goal is to eventually run Rnote's real
+Rust engine underneath this app instead of a Kotlin reimplementation of it. See
+[Where this is heading](#where-this-is-heading).
+
 > **Unofficial and unaffiliated.** This project is not endorsed by, connected
 > to, or maintained by the Rnote project or its authors. The package name
 > (`com.rnote.baby`), the app label, and the launcher artwork all borrow from
@@ -45,6 +49,33 @@ mode; the three non-polygon selector modes; separate fill color.
 
 **Not built**: layers (the stroke list is flat), selection scale/rotate handles,
 clipboard, document tabs.
+
+## Where this is heading
+
+The long-term plan is to stop reimplementing Rnote's engine and start *using*
+it.
+
+What makes this plausible: Rnote's engine is already split into `rnote-compose`
+(geometry and math) and `rnote-engine` (documents, strokes, rendering), and
+neither crate depends on GTK — only the `rnote-ui` layer does. GTK4 is the
+reason the desktop app can't run on Android; the engine underneath it has no
+such problem, and should cross-compile for Android via `cargo-ndk`. See
+[rnote#390](https://github.com/flxzt/rnote/issues/390) for upstream discussion
+of Android support.
+
+The scaffolding for this is already in the repo, unused:
+`bridge/RnoteNativeBridge.kt` tries to load `librnote_engine_android.so`,
+degrades quietly to `isNativeEngineAvailable() == false` when it isn't there,
+and declares the JNI signatures the engine would be driven through. Nothing
+calls it yet.
+
+That's the destination, not a promise about timing — it's a substantial piece of
+work and this is a spare-time project. The Kotlin implementation is not throwaway
+either: it's what makes the app useful today, and a working, well-tested Kotlin
+reader/writer is exactly what you need to check a native engine against when one
+does get wired up. If cross-compiling the engine is the sort of thing you enjoy,
+this is the single most interesting thing on the roadmap — see
+[Contributing](#contributing).
 
 ## Building
 
@@ -113,6 +144,10 @@ Especially useful:
   the Split Strokes eraser, and selection scale/rotate handles all have UI slots
   wired up and waiting for an implementation. Layers are a bigger lift — the
   document model is flat today.
+- **Cross-compiling Rnote's engine for Android.** The most ambitious item on the
+  list, described under [Where this is heading](#where-this-is-heading). If you
+  know your way around `cargo-ndk` and JNI, I'd love the help — or just the
+  advice on whether the approach holds up.
 
 A few practical notes: `./gradlew test` should pass before you open a PR (the
 build and test instructions are above). If you're changing how `.rnote` files
