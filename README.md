@@ -151,7 +151,7 @@ always welcome.
 
 - **[Rnote](https://github.com/flxzt/rnote)** by flxzt and its contributors — the
   application this one aims to be compatible with, and the source of the file
-  format, the icon set, and the launcher artwork. GPL-3.0.
+  format, the icon set, and the launcher artwork. Uses GPL-3.0.
 - **[rnoteviewer-android](https://github.com/Intranox/rnoteviewer-android)** by
   Intranox — this project's `.rnote` parser was ported and adapted from theirs.
   Working out how to stream the format is the hard part of reading it, and that
