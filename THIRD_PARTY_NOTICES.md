@@ -26,8 +26,34 @@ only the real glyph's path(s) were extracted (see `GeneratedIcons.kt`'s KDoc
 for how they were distinguished).
 
 Path coordinates were transcribed as-is from the original SVGs' `d`
-attributes into Compose `ImageVector`s via `addPathNodes`; no other assets
-from the Rnote project are included in this repository.
+attributes into Compose `ImageVector`s via `addPathNodes`.
+
+## Launcher icon (`app/src/main/res/mipmap-*/ic_launcher_foreground.png`)
+
+The launcher icon is a **derivative work** of desktop Rnote's own application
+icon.
+
+- Source: https://github.com/flxzt/rnote
+- License: GPL-3.0 (see `LICENSE` at the root of this repository)
+- Copyright: the Rnote contributors
+
+What is whose: the notebook artwork — the bound cover, the ruled paper, the red
+margin rule — is Rnote's, unchanged. The hand-drawn squiggle across the page is
+an original addition by this project's author and is not part of the upstream
+icon.
+
+The composite was then adapted mechanically for Android's adaptive-icon format:
+transparent margins trimmed, scaled to 56% of the 108dp foreground canvas so the
+artwork survives a circular launcher mask, and rasterized once per density
+bucket (mdpi through xxxhdpi). No recoloring or redrawing of the Rnote artwork
+was done.
+
+## Scope
+
+Beyond the icon path data and the launcher artwork described above, no assets
+from the Rnote project are included in this repository. The `.rnote` file format
+support is an independent reimplementation in Kotlin; no upstream source code is
+copied or linked.
 
 This repository is licensed GPL-3.0 in its entirety (see `LICENSE`) so that
 incorporating this GPL-3.0 material is fully compliant.

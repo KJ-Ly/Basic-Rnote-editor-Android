@@ -37,3 +37,10 @@ Desktop.ini
 *.swp
 *~
 *.log
+
+# Kotlin build scratch
+.kotlin/
+
+# Internal working notes, kept locally
+HANDOFF.md
+UI_REDESIGN.md
