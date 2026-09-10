@@ -182,11 +182,17 @@ object FileManager {
             },
             isDarkMode = bg.color.r < 0.5f,
             pageSize = PageSize.CUSTOM,
+            // Taken from the format itself rather than the file's `orientation` field:
+            // the dimensions are what the document is, the field only what it calls
+            // itself, and files this app wrote before it emitted a real one say
+            // "portrait" over a landscape page. The custom size goes in portrait-order so
+            // that effectivePage*Px, which swaps for landscape, lands back on the format.
+            isLandscape = formatW > formatH,
             // A file with no layout at all used to land on FIXED_SIZE here, which is how
             // an infinite document silently became a single page on reload.
             layoutMode = com.rnote.baby.model.LayoutMode.fromApiName(native.layout),
-            customWidthPx = formatW,
-            customHeightPx = formatH,
+            customWidthPx = if (formatW > formatH) formatH else formatW,
+            customHeightPx = if (formatW > formatH) formatW else formatH,
             customGridSpacingPx = bg.patternWidth,
             customPatternHeightPx = bg.patternHeight,
             customBackgroundColor = bg.color.toComposeColor(),

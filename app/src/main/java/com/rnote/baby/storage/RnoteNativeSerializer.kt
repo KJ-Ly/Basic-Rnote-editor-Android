@@ -207,13 +207,20 @@ object RnoteNativeSerializer {
 
     private fun StringBuilder.appendDocument(doc: RnoteNativeDocument) {
         val bg = doc.background
+        // Rnote's orientation is a label on the format, not a second source of truth for
+        // it: the width and height are already swapped by the time they reach here. It
+        // used to be written as "portrait" whatever the page was, which left a landscape
+        // file contradicting itself — desktop believes the field, so its format panel
+        // showed Portrait for a page half again as wide as it was tall, and the next
+        // orientation toggle there started from the wrong state.
+        val orientation = if (doc.pageWidth > doc.pageHeight) "landscape" else "portrait"
         append("""{
             |"config":{
             |  "format":{
             |    "width":${doc.pageWidth},
             |    "height":${doc.pageHeight},
             |    "dpi":96,
-            |    "orientation":"portrait",
+            |    "orientation":"$orientation",
             |    "border_color":${doc.borderColor.toJson()},
             |    "show_borders":${doc.showBorders},
             |    "show_origin_indicator":${doc.showOriginIndicator}

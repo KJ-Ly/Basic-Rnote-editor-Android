@@ -184,6 +184,41 @@ class DocumentRoundTripTest {
     }
 
     @Test
+    fun `a landscape page comes back landscape, and says so`() {
+        // The page is the A3 preset turned on its side, so the file must carry the turned
+        // dimensions and call itself landscape — desktop reads the label off the file and
+        // showed Portrait over a page wider than it was tall for as long as we wrote one.
+        val landscape = documentWith(LayoutMode.FIXED_SIZE).let {
+            it.copy(paperStyle = it.paperStyle.copy(isLandscape = true))
+        }
+        val native = RnoteNativeSerializer.bridgeToNative(landscape)
+        assertEquals(1587f, native.pageWidth, eps)
+        assertEquals(1123f, native.pageHeight, eps)
+
+        val json = ByteArrayOutputStream()
+            .also { RnoteNativeSerializer.serialize(it, native) }
+            .let { java.util.zip.GZIPInputStream(ByteArrayInputStream(it.toByteArray())) }
+            .readBytes().toString(Charsets.UTF_8)
+        assertTrue(
+            "expected a landscape orientation in the file",
+            json.contains(""""orientation":"landscape"""")
+        )
+
+        val reloaded = throughRnote(landscape)
+        assertTrue("expected the page to reload as landscape", reloaded.paperStyle.isLandscape)
+        assertEquals(1587f, reloaded.paperStyle.effectivePageWidthPx, eps)
+        assertEquals(1123f, reloaded.paperStyle.effectivePageHeightPx, eps)
+    }
+
+    @Test
+    fun `a portrait page is not turned on its side by the round trip`() {
+        val reloaded = throughRnote(documentWith(LayoutMode.FIXED_SIZE))
+        assertEquals(false, reloaded.paperStyle.isLandscape)
+        assertEquals(1123f, reloaded.paperStyle.effectivePageWidthPx, eps)
+        assertEquals(1587f, reloaded.paperStyle.effectivePageHeightPx, eps)
+    }
+
+    @Test
     fun `strokes survive the whole loop`() {
         val reloaded = throughRnote(documentWith(LayoutMode.INFINITE))
         val stroke = reloaded.strokes.single()
