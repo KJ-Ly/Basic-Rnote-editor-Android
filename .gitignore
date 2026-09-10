@@ -44,3 +44,10 @@ Desktop.ini
 # Internal working notes, kept locally
 HANDOFF.md
 UI_REDESIGN.md
+
+# Manual .rnote scratch from format testing, kept locally.
+# Only the three fixtures RnoteFixtureTest reads are tracked.
+tests/*.rnote
+!tests/test.rnote
+!tests/H3.rnote
+!tests/L2b.rnote
