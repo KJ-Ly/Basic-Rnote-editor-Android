@@ -13,10 +13,10 @@ Rust engine underneath this app instead of a Kotlin reimplementation of it. See
 [Where this is heading](#where-this-is-heading).
 
 > **Unofficial and unaffiliated.** This project is not endorsed by, connected
-> to, or maintained by the Rnote project or its authors. The package name
-> (`com.rnote.baby`), the app label, and the launcher artwork all borrow from
-> Rnote — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for exactly
-> what is borrowed and under what terms. Please direct bugs here, not upstream.
+> to, or maintained by the Rnote project or its authors. The name and the
+> launcher artwork both borrow from Rnote — see
+> [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for exactly what is borrowed
+> and under what terms. Please direct bugs here, not upstream.
 
 ## Status
 

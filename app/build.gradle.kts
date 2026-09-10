@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.rnote.baby"
+    namespace = "io.github.kjly.brna"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.rnote.baby"
+        applicationId = "io.github.kjly.brna"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
