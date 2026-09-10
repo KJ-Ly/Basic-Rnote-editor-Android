@@ -63,12 +63,6 @@ such problem, and should cross-compile for Android via `cargo-ndk`. See
 [rnote#390](https://github.com/flxzt/rnote/issues/390) for upstream discussion
 of Android support.
 
-The scaffolding for this is already in the repo, unused:
-`bridge/RnoteNativeBridge.kt` tries to load `librnote_engine_android.so`,
-degrades quietly to `isNativeEngineAvailable() == false` when it isn't there,
-and declares the JNI signatures the engine would be driven through. Nothing
-calls it yet.
-
 That's the destination, not a promise about timing — it's a substantial piece of
 work and this is a spare-time project. The Kotlin implementation is not throwaway
 either: it's what makes the app useful today, and a working, well-tested Kotlin
