@@ -62,13 +62,7 @@ such problem, and should cross-compile for Android via `cargo-ndk`. See
 of Android support.
 
 Note that there is no promise about timing here. This is a spare-time project and
-the Kotlin backend is good enough for many use cases.  
-
-That's the destination, not a promise about timing — it's a substantial piece of
-work and this is a spare-time project. The Kotlin implementation is not throwaway
-either: it's what makes the app useful today, and a working, well-tested Kotlin
-reader/writer is exactly what you need to check a native engine against when one
-does get wired up. If cross-compiling the engine is the sort of thing you enjoy,
+the Kotlin backend is good enough for many use cases. If cross-compiling the engine is the sort of thing you enjoy,
 this is the most ambitious thing on the roadmap — see
 [Contributing](#contributing).
 
