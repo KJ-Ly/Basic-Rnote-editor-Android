@@ -12,17 +12,16 @@ opens on a tablet and a file drawn on the tablet opens back on the desktop.
 Rust engine underneath this app instead of a Kotlin reimplementation of it. See
 [Where this is heading](#where-this-is-heading).
 
-> **Unofficial and unaffiliated.** This project is not endorsed by, connected
-> to, or maintained by the Rnote project or its authors. The name and the
+> **Unofficial and unaffiliated.** This project is not endorsed by, affiliated with, or maintained by the Rnote project or its authors. The name and the
 > launcher artwork both borrow from Rnote — see
 > [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for exactly what is borrowed
-> and under what terms. Please direct bugs here, not upstream.
+> and under what terms. Please direct bugs here, not to them!
 
 ## Status
 
 Usable for handwriting and sketching. It's a personal project, not a finished
-product — several tools in the UI are deliberate placeholders for parity with
-desktop Rnote's layout, and are disabled rather than half-working.
+product — several tools in the UI are disabled, grayed-out placeholders for parity with
+desktop Rnote's layout.
 
 **Working**
 
@@ -52,29 +51,25 @@ clipboard, document tabs.
 
 ## Where this is heading
 
-The long-term plan is to stop reimplementing Rnote's engine and start *using*
-it.
+The long-term plan is to implement Rnote's native Rust engine in the app's backend.
 
-What makes this plausible: Rnote's engine is already split into `rnote-compose`
+We believe this to be possible because Rnote's engine is already split into `rnote-compose`
 (geometry and math) and `rnote-engine` (documents, strokes, rendering), and
 neither crate depends on GTK — only the `rnote-ui` layer does. GTK4 is the
 reason the desktop app can't run on Android; the engine underneath it has no
 such problem, and should cross-compile for Android via `cargo-ndk`. See
-[rnote#390](https://github.com/flxzt/rnote/issues/390) for upstream discussion
+[rnote#390](https://github.com/flxzt/rnote/issues/390) for thorough discussion
 of Android support.
 
-The scaffolding for this is already in the repo, unused:
-`bridge/RnoteNativeBridge.kt` tries to load `librnote_engine_android.so`,
-degrades quietly to `isNativeEngineAvailable() == false` when it isn't there,
-and declares the JNI signatures the engine would be driven through. Nothing
-calls it yet.
+Note that there is no promise about timing here. This is a spare-time project and
+the Kotlin backend is good enough for many use cases.  
 
 That's the destination, not a promise about timing — it's a substantial piece of
 work and this is a spare-time project. The Kotlin implementation is not throwaway
 either: it's what makes the app useful today, and a working, well-tested Kotlin
 reader/writer is exactly what you need to check a native engine against when one
 does get wired up. If cross-compiling the engine is the sort of thing you enjoy,
-this is the single most interesting thing on the roadmap — see
+this is the most ambitious thing on the roadmap — see
 [Contributing](#contributing).
 
 ## Building
