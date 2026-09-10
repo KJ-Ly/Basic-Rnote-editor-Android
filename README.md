@@ -1,9 +1,9 @@
-# Baby Rnote
+# Basic Rnote Editor for Android
 
 An Android note-taking app, built in Kotlin and Jetpack Compose, that reads and
 writes `.rnote` files produced by [the open-source desktop application Rnote](https://github.com/flxzt/rnote).
 
-Baby Rnote does not currently embed Rnote's Rust engine — it reimplements the parts
+This app does not currently embed Rnote's Rust engine — it reimplements the parts
 that matter for interoperability (the v0.14 document schema, stroke geometry,
 paper patterns, page layout) in pure Kotlin, so that a file drawn on the desktop
 opens on a tablet and a file drawn on the tablet opens back on the desktop.

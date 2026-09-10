@@ -16,5 +16,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Baby Rnote"
+rootProject.name = "Basic Rnote Editor for Android"
 include(":app")

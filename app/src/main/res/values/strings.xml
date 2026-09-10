@@ -1,3 +1,5 @@
 <resources>
-    <string name="app_name">Baby Rnote</string>
+    <!-- The full name is "Basic Rnote Editor for Android"; launchers truncate
+         anything this long, so the icon label is the short form. -->
+    <string name="app_name">Basic Rnote</string>
 </resources>
