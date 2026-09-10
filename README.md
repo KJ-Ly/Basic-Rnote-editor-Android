@@ -158,8 +158,19 @@ GPL-3.0, like the rest of the project.
 If you're unsure whether an idea fits, open an issue and ask first. That's
 always welcome.
 
+## Credits
+
+- **[Rnote](https://github.com/flxzt/rnote)** by flxzt and its contributors — the
+  application this one aims to be compatible with, and the source of the file
+  format, the icon set, and the launcher artwork. GPL-3.0.
+- **[rnoteviewer-android](https://github.com/Intranox/rnoteviewer-android)** by
+  Intranox — this project's `.rnote` parser was ported and adapted from theirs.
+  Working out how to stream the format is the hard part of reading it, and that
+  groundwork was theirs. (See the licensing note in
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).)
+
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE) for the full text and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the Rnote-derived material
-this project includes.
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the borrowed material this
+project includes and the terms it comes under.

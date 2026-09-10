@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-## Icons (`app/src/main/java/com/rnote/baby/ui/icons/`)
+## Icons (`app/src/main/java/io/github/kjly/brna/ui/icons/`)
 
 The vector path data for the following icons is adapted from desktop Rnote's
 own symbolic icon set:
@@ -48,12 +48,42 @@ artwork survives a circular launcher mask, and rasterized once per density
 bucket (mdpi through xxxhdpi). No recoloring or redrawing of the Rnote artwork
 was done.
 
+## `.rnote` parser (`storage/RnoteNativeParser.kt`)
+
+The streaming `.rnote` reader was ported and adapted from **rnoteviewer-android**
+by Intranox, an Android `.rnote` viewer.
+
+- Source: https://github.com/Intranox/rnoteviewer-android
+- File: `app/src/main/java/com/example/rnoteviewer/RnoteParser.kt`
+- Author: Intranox
+
+What was taken: the overall approach of streaming gzipped `.rnote` JSON through
+Gson's `JsonReader` rather than materializing it, and the decomposition of that
+work into per-element parse functions (`parseRoot`, `parseDocument`,
+`parseFormatConfig`, `parseBgConfig`, `parseBrushstroke`, `parseShapestroke`,
+`parseChronoComponents`, `parseColor`, `parseTransform`, and the individual
+shape readers). Several shape type names in `model/RnoteNativeDocument.kt`
+follow theirs as well.
+
+What is not theirs: everything on the writing side. `RnoteNativeSerializer` has
+no counterpart upstream — rnoteviewer-android only reads `.rnote` files — as
+does the round-trip fidelity work that goes with it, along with this project's
+rendering, export, and editing layers.
+
+> **Licensing status — unresolved.** As of 2026-09-09 the rnoteviewer-android
+> repository publishes no LICENSE file, which under default copyright terms
+> means all rights are reserved and no permission to reuse the code has been
+> granted. This project has not obtained that permission. The attribution above
+> is offered in good faith and is not a substitute for it. Resolving this —
+> by asking Intranox to license the work, or by replacing the derived code —
+> is a prerequisite to distributing this project.
+
 ## Scope
 
 Beyond the icon path data and the launcher artwork described above, no assets
-from the Rnote project are included in this repository. The `.rnote` file format
-support is an independent reimplementation in Kotlin; no upstream source code is
-copied or linked.
+from the Rnote project are included in this repository, and no code from it is
+copied or linked. The parser's ancestry is rnoteviewer-android, described above,
+not Rnote itself.
 
 This repository is licensed GPL-3.0 in its entirety (see `LICENSE`) so that
 incorporating this GPL-3.0 material is fully compliant.
