@@ -81,16 +81,48 @@ a mistake is a wrong *number* rather than a wrong pixel: stroke outline
 geometry, pressure curves, eraser hit-testing, viewport math, and the `.rnote`
 reader/writer.
 
-The `tests/` directory holds real `.rnote` files written by desktop Rnote across
-a range of page sizes and layouts. `RnoteFixtureTest` parses `tests/test.rnote`
-directly from disk — round-trip tests only prove the reader and writer agree
-with *each other*, so this is the one that proves they agree with the real
-application. The other fixtures are there for manual import checks through the
-app's Open menu.
+The `tests/` directory holds three real `.rnote` files written by desktop Rnote,
+which `RnoteFixtureTest` reads straight off disk: `test.rnote` (strokes and an
+infinite layout), `L2b.rnote` (curve segments) and `H3.rnote` (shapes). These
+matter more than the round-trip tests — those only prove this project's reader
+and writer agree with *each other*, whereas these prove they agree with the real
+application.
 
 Anything needing a live Compose runtime or `android.graphics` — canvas input
 handling, background rendering, raster export — isn't covered and needs a
 device.
+
+## Contributing
+
+Contributions are genuinely welcome — issues, pull requests, or just a note that
+something is broken. This is a personal project built in spare time, so replies
+may not be quick, but nothing here is closed off and no contribution is too
+small.
+
+Especially useful:
+
+- **Format compatibility bugs.** If a file drawn in desktop Rnote opens wrong
+  here — or a file saved here opens wrong there — that's the most valuable kind
+  of report. Please attach the `.rnote` file; the format work is essentially
+  reverse-engineered, so a real file that breaks it is worth more than a
+  description of the breakage.
+- **Testing on other hardware.** Development happens on a single Samsung tablet
+  with an S-Pen. Stylus behaviour varies a lot between vendors, and pressure,
+  hover, and barrel-button handling are all places where "works here" proves
+  very little. Reports from other devices are useful even when everything works.
+- **The disabled tools.** Shaper, Typewriter, Tools, the Textured brush style,
+  the Split Strokes eraser, and selection scale/rotate handles all have UI slots
+  wired up and waiting for an implementation. Layers are a bigger lift — the
+  document model is flat today.
+
+A few practical notes: `./gradlew test` should pass before you open a PR (the
+build and test instructions are above). If you're changing how `.rnote` files
+are read or written, please add a fixture-backed test — that layer is where
+mistakes are quietest. And by contributing you agree your work is licensed
+GPL-3.0, like the rest of the project.
+
+If you're unsure whether an idea fits, open an issue and ask first. That's
+always welcome.
 
 ## License
 
