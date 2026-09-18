@@ -89,28 +89,6 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 export JAVA_HOME=/path/to/Android\ Studio/jbr
 ```
 
-## Tests
-
-```bash
-./gradlew test
-```
-
-JVM unit tests only — no device or emulator needed. They cover the layers where
-a mistake is a wrong *number* rather than a wrong pixel: stroke outline
-geometry, pressure curves, eraser hit-testing, viewport math, and the `.rnote`
-reader/writer.
-
-The `tests/` directory holds three real `.rnote` files written by desktop Rnote,
-which `RnoteFixtureTest` reads straight off disk: `test.rnote` (strokes and an
-infinite layout), `L2b.rnote` (curve segments) and `H3.rnote` (shapes). These
-matter more than the round-trip tests — those only prove this project's reader
-and writer agree with *each other*, whereas these prove they agree with the real
-application.
-
-Anything needing a live Compose runtime or `android.graphics` — canvas input
-handling, background rendering, raster export — isn't covered and needs a
-device.
-
 ## Contributing
 
 Contributions are highly encouraged — issues, pull requests, or just a note that
@@ -138,11 +116,12 @@ Especially useful:
   know your way around `cargo-ndk` and JNI, I'd love the help — or just the
   advice on whether the approach holds up.
 
-A few practical notes: `./gradlew test` should pass before you open a PR (the
-build and test instructions are above). If you're changing how `.rnote` files
-are read or written, please add a fixture-backed test — that layer is where
-mistakes are quietest. And by contributing you agree your work is licensed
-GPL-3.0, like the rest of the project.
+A few practical notes: `./gradlew test` should pass before you open a PR —
+the tests are JVM-only, no device or emulator needed. If you're changing how
+`.rnote` files are read or written, please add a test backed by a real file
+from desktop Rnote (the `tests/` directory holds the ones the existing tests
+read) — that layer is where mistakes are quietest. And by contributing you
+agree your work is licensed GPL-3.0, like the rest of the project.
 
 If you're unsure whether an idea fits, open an issue and ask first. That's
 always welcome.
