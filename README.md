@@ -49,6 +49,11 @@ mode; the three non-polygon selector modes; separate fill color.
 **Not built**: layers (the stroke list is flat), selection scale/rotate handles,
 clipboard, document tabs.
 
+## Screenshots
+
+<img width="1600" height="2391" alt="Screenshot_20260917_170121_Basic Rnote" src="https://github.com/user-attachments/assets/78b9121f-6cd6-4f9b-aaf0-10cdb5bc41fe" />
+<img width="1600" height="2375" alt="Screenshot_20260917_170142_Basic Rnote" src="https://github.com/user-attachments/assets/2162273e-0e09-4813-9edd-806a91ec21e4" />
+
 ## Where this is heading
 
 The long-term plan is to implement Rnote's native Rust engine in the app's backend.
