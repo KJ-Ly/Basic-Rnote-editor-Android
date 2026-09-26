@@ -88,6 +88,7 @@ import io.github.kjly.brna.export.ShareTarget
 import io.github.kjly.brna.model.BrushStyle
 import io.github.kjly.brna.model.FixedPages
 import io.github.kjly.brna.model.LayoutMode
+import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.NativeBitmapElement
 import io.github.kjly.brna.model.NativeBrushStroke
 import io.github.kjly.brna.model.NativeCanvasElement
@@ -142,6 +143,9 @@ import io.github.kjly.brna.ui.canvas.SelectionManager
 import io.github.kjly.brna.ui.components.ColorPicker
 import io.github.kjly.brna.ui.components.ExportSheet
 import io.github.kjly.brna.ui.components.PageSettingsSheet
+import io.github.kjly.brna.storage.PdfImportPrefs
+import io.github.kjly.brna.storage.PdfPageLayout
+import io.github.kjly.brna.ui.components.PdfImportDialog
 import io.github.kjly.brna.ui.components.PenConfigStrip
 import io.github.kjly.brna.ui.components.PenPicker
 import io.github.kjly.brna.ui.components.RnoteTopBar
@@ -376,14 +380,28 @@ class MainActivity : ComponentActivity() {
         CreateDocumentNear("application/octet-stream")
     ) { uri -> uri?.let { finishSaveAs(it, asRnote = true) } }
 
-    /** Where imported PDF pages go: page width, format height, and the top of the first. */
-    private class PdfImportTarget(val pageWidth: Float, val formatHeight: Float, val startY: Float)
+    /**
+     * Where imported PDF pages go: the note's format, and Rnote's insert position — the
+     * top left of the view, [PdfPageLayout.IMPORT_OFFSET] into it, and not before the
+     * document's origin.
+     */
+    private class PdfImportTarget(
+        val formatWidth: Float,
+        val formatHeight: Float,
+        val insertX: Float,
+        val insertY: Float
+    )
 
-    /** Installed by the UI, which knows the note's format and where its content ends. */
+    /** Installed by the UI, which knows the note's format and the view. */
     private var pdfImportTarget: (() -> PdfImportTarget)? = null
 
-    /** Installed by the UI: adds imported pages to the open note. */
-    private var onPdfImported: ((List<NativeVectorImageElement>) -> Unit)? = null
+    /** Installed by the UI: adds imported pages to the open note; true when the document is adjusted to them. */
+    private var onPdfImported: ((List<NativeVectorImageElement>, Boolean) -> Unit)? = null
+
+    /** A PDF picked for import, waiting in Rnote's import dialog: its name and every page's size. */
+    private class PendingPdfImport(val uri: Uri, val fileName: String, val pageSizes: List<Pair<Float, Float>>)
+
+    private var pendingPdfImport by mutableStateOf<PendingPdfImport?>(null)
 
     private val importPdfLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -422,18 +440,45 @@ class MainActivity : ComponentActivity() {
     private var ctrlSpaceDown = false
 
     /** Renders the PDF's pages off the main thread and adds them to the open note. */
+    /** Reads the PDF's pages, then asks how to import them, as Rnote's import dialog does. */
     private fun importPdf(uri: Uri) {
+        if (busyMessage != null) return
+        busyMessage = "Reading PDF…"
+        lifecycleScope.launch {
+            val sizes = withContext(Dispatchers.IO) {
+                try {
+                    PdfImporter.pageSizes(this@MainActivity, uri)
+                } catch (e: Throwable) {
+                    // A password-protected or broken PDF.
+                    e.printStackTrace()
+                    null
+                }
+            }
+            busyMessage = null
+            if (sizes.isNullOrEmpty()) {
+                Toast.makeText(this@MainActivity, "Could not import the PDF", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val name = DocumentUri.displayName(this@MainActivity, uri) ?: "PDF"
+            pendingPdfImport = PendingPdfImport(uri, name, sizes)
+        }
+    }
+
+    /** Pages [first] to [last] (from 0) of [request], placed and drawn as [prefs] say. */
+    private fun runPdfImport(request: PendingPdfImport, prefs: PdfImportPrefs, first: Int, last: Int) {
         val target = pdfImportTarget?.invoke() ?: return
         if (busyMessage != null) return
+        val placed = PdfPageLayout.place(
+            request.pageSizes, first, last, prefs,
+            target.formatWidth, target.formatHeight, target.insertX, target.insertY
+        )
         busyMessage = "Importing PDF…"
         lifecycleScope.launch {
             val pages = withContext(Dispatchers.IO) {
                 try {
-                    PdfImporter.import(
-                        this@MainActivity, uri, target.pageWidth, target.formatHeight, target.startY
-                    )
+                    PdfImporter.import(this@MainActivity, request.uri, placed)
                 } catch (e: Throwable) {
-                    // A password-protected or broken PDF, or one too big to render.
+                    // A broken PDF, or one too big to render.
                     e.printStackTrace()
                     null
                 }
@@ -442,7 +487,7 @@ class MainActivity : ComponentActivity() {
             if (pages.isNullOrEmpty()) {
                 Toast.makeText(this@MainActivity, "Could not import the PDF", Toast.LENGTH_LONG).show()
             } else {
-                onPdfImported?.invoke(pages)
+                onPdfImported?.invoke(pages, prefs.adjustDocument)
                 Toast.makeText(
                     this@MainActivity,
                     if (pages.size == 1) "Imported 1 page" else "Imported ${pages.size} pages",
@@ -1747,31 +1792,51 @@ class MainActivity : ComponentActivity() {
             pdfImportTarget = {
                 val pageW = paperStyle.effectivePageWidthPx.takeIf { it > 0f } ?: 793.7f
                 val pageH = paperStyle.effectivePageHeightPx.takeIf { it > 0f } ?: 1122.5f
-                val others = documentNativeElements.filter { it !is NativeBrushStroke }
-                val hasContent = strokes.isNotEmpty() || others.isNotEmpty()
-                // Below everything already in the note, starting on the next whole page.
-                val bottom = maxOf(
-                    strokes.maxOfOrNull { s -> s.points.maxOfOrNull { it.y } ?: 0f } ?: 0f,
-                    others.maxOfOrNull { it.maxY } ?: 0f
+                // Rnote's `determine_stroke_import_pos`: into the view by the import offset,
+                // but not before the document's origin, which only an infinite one goes past.
+                val corner = viewportState.screenToCanvas(
+                    androidx.compose.ui.geometry.Offset(PdfPageLayout.IMPORT_OFFSET, PdfPageLayout.IMPORT_OFFSET)
                 )
-                val startY = if (hasContent) (floor(bottom / pageH) + 1f) * pageH else 0f
-                PdfImportTarget(pageW, pageH, startY)
+                val infinite = paperStyle.layoutMode == LayoutMode.INFINITE
+                PdfImportTarget(
+                    pageW, pageH,
+                    if (infinite) corner.x else corner.x.coerceAtLeast(0f),
+                    if (infinite) corner.y else corner.y.coerceAtLeast(0f)
+                )
             }
-            onPdfImported = { pages ->
+            onPdfImported = { pages, adjust ->
                 // Ahead of the rest: the document layer is drawn first, under everything.
                 pushUndo()
                 redoStack.clear()
                 documentNativeElements = pages + documentNativeElements
+                if (adjust) {
+                    // Rnote's "Adjust Document": the format the largest page, Fixed Size.
+                    val w = pages.maxOf { it.maxX - it.minX }
+                    val h = pages.maxOf { it.maxY - it.minY }
+                    paperStyle = paperStyle.copy(
+                        pageSize = PageSize.CUSTOM,
+                        isLandscape = w > h,
+                        customWidthPx = minOf(w, h),
+                        customHeightPx = maxOf(w, h),
+                        layoutMode = LayoutMode.FIXED_SIZE
+                    )
+                }
                 isModified = true
                 // A Fixed Size document gets the pages the PDF needs, as in Rnote.
                 fitPagesToContent()
-                // Bring the first imported page into view at the current zoom.
-                viewportState = viewportState.copy(
-                    panOffset = androidx.compose.ui.geometry.Offset(
-                        ViewportState.ORIGIN_MARGIN_PX,
-                        ViewportState.ORIGIN_MARGIN_PX - pages.first().minY * viewportState.effectiveScale
+                if (adjust) {
+                    // The pages start at the origin: bring it into view.
+                    viewportState = viewportState.copy(
+                        panOffset = androidx.compose.ui.geometry.Offset(ViewportState.ORIGIN_MARGIN_PX, ViewportState.ORIGIN_MARGIN_PX)
                     )
-                )
+                } else {
+                    // Selected, as Rnote leaves them, to be moved where they should go.
+                    penShortcutState.picked()
+                    toolConfig = toolConfig.copy(activeTool = ToolType.SELECTOR)
+                    selectedStrokes.clear()
+                    selectedNatives.clear()
+                    selectedNatives.addAll(pages)
+                }
             }
 
             // ── Inserted images ───────────────────────────────────────────────────
@@ -2807,6 +2872,20 @@ class MainActivity : ComponentActivity() {
                     }
 
                     // ── Export Sheet ──────────────────────────────────────────────
+                    pendingPdfImport?.let { request ->
+                        PdfImportDialog(
+                            fileName = request.fileName,
+                            pageCount = request.pageSizes.size,
+                            initialPrefs = SettingsManager.loadPdfImportPrefs(this@MainActivity),
+                            isDark = paperStyle.isDarkMode,
+                            onDismiss = { pendingPdfImport = null },
+                            onImport = { prefs, first, last ->
+                                pendingPdfImport = null
+                                SettingsManager.savePdfImportPrefs(this@MainActivity, prefs)
+                                runPdfImport(request, prefs, first, last)
+                            }
+                        )
+                    }
                     if (showExportSheet) {
                         val exportDocument = NoteDocument(
                             title = documentTitle,

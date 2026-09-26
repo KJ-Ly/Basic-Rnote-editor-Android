@@ -9,7 +9,6 @@ import android.net.Uri
 import android.util.Base64
 import io.github.kjly.brna.model.NativeVectorImageElement
 import java.io.ByteArrayOutputStream
-import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
@@ -30,42 +29,41 @@ object PdfImporter {
     /** Largest rendered side, so one oversized page can't exhaust memory. */
     private const val MAX_RENDER_SIDE = 4096
 
-    /**
-     * The pages of the PDF at [uri], each [pageWidth] document units wide and starting
-     * on a fresh page of the note's format from [startY] down, one after the other.
-     * Blocking; call off the main thread. Throws when the file isn't a readable PDF.
-     */
-    fun import(
-        context: Context,
-        uri: Uri,
-        pageWidth: Float,
-        formatHeight: Float,
-        startY: Float
-    ): List<NativeVectorImageElement> {
+    /** Every page's size in points, the first page's among them; what the import dialog and [PdfPageLayout] go by. */
+    fun pageSizes(context: Context, uri: Uri): List<Pair<Float, Float>> {
         val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
             ?: throw IllegalArgumentException("Cannot open $uri")
         return descriptor.use { fd ->
             PdfRenderer(fd).use { renderer ->
-                var y = startY
                 (0 until renderer.pageCount).map { index ->
-                    renderer.openPage(index).use { page ->
-                        val element = importPage(page, pageWidth, y)
-                        // Each page starts on a page of its own, so the note's page grid
-                        // and a page-by-page export line up with the PDF's pages.
-                        val height = element.maxY - element.minY
-                        y += ceil(height / formatHeight).coerceAtLeast(1f) * formatHeight
-                        element
-                    }
+                    renderer.openPage(index).use { it.width.toFloat() to it.height.toFloat() }
                 }
             }
         }
     }
 
-    private fun importPage(page: PdfRenderer.Page, docWidth: Float, top: Float): NativeVectorImageElement {
-        // PDF units are points; the page keeps its proportions at the note's width.
+    /**
+     * The pages of the PDF at [uri] that [placed] names, each drawn into its rectangle.
+     * Blocking; call off the main thread. Throws when the file isn't a readable PDF.
+     */
+    fun import(context: Context, uri: Uri, placed: List<PdfPageLayout.Placed>): List<NativeVectorImageElement> {
+        val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
+            ?: throw IllegalArgumentException("Cannot open $uri")
+        return descriptor.use { fd ->
+            PdfRenderer(fd).use { renderer ->
+                placed.map { spot ->
+                    renderer.openPage(spot.index).use { page -> importPage(page, spot) }
+                }
+            }
+        }
+    }
+
+    private fun importPage(page: PdfRenderer.Page, spot: PdfPageLayout.Placed): NativeVectorImageElement {
+        // PDF units are points; the rectangle keeps the page's proportions.
         val ptW = page.width.toFloat().coerceAtLeast(1f)
         val ptH = page.height.toFloat().coerceAtLeast(1f)
-        val docHeight = ptH * docWidth / ptW
+        val docWidth = spot.width.coerceAtLeast(1f)
+        val docHeight = spot.height.coerceAtLeast(1f)
 
         var pxW = docWidth * RENDER_SCALE
         var pxH = docHeight * RENDER_SCALE
@@ -104,10 +102,10 @@ object PdfImporter {
             intrinsicHeight = ptH,
             halfExtentX = hx,
             halfExtentY = hy,
-            transform = floatArrayOf(1f, 0f, 0f, 1f, hx, top + hy),
+            transform = floatArrayOf(1f, 0f, 0f, 1f, spot.x + hx, spot.y + hy),
             // Where Rnote puts imported PDF pages: beneath images and all ink.
             layer = "document",
-            minX = 0f, minY = top, maxX = docWidth, maxY = top + docHeight
+            minX = spot.x, minY = spot.y, maxX = spot.x + docWidth, maxY = spot.y + docHeight
         )
     }
 }

@@ -38,6 +38,7 @@ object SettingsManager {
     private const val KEY_BLOCK_PINCH_ZOOM   = "blockPinchZoom"
     private const val KEY_RESPECT_BORDERS    = "respectBorders"
     private const val KEY_PEN_SHORTCUTS      = "penShortcuts"
+    private const val KEY_PDF_IMPORT         = "pdfImportPrefs"
 
     fun save(
         context: Context,
@@ -146,6 +147,19 @@ object SettingsManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_PEN_SOUNDS, on)
+            .apply()
+    }
+
+    /** Rnote's PDF import preferences, the last ones chosen, as Rnote keeps them; its defaults until then. */
+    fun loadPdfImportPrefs(context: Context): PdfImportPrefs =
+        PdfImportPrefs.decode(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_PDF_IMPORT, null)
+        )
+
+    fun savePdfImportPrefs(context: Context, prefs: PdfImportPrefs) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PDF_IMPORT, prefs.encode())
             .apply()
     }
 

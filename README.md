@@ -122,7 +122,10 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   app is open it also looks every 30 seconds, and loads a newer version when
   nothing here is unsaved, so the tablet follows along as the laptop saves.
 - **Import**: PDF pages, and pictures from the gallery or the camera, written
-  the way desktop Rnote writes its own imports. A Xournal++ `.xopp` opens as a new
+  the way desktop Rnote writes its own imports. PDFs through Rnote's import dialog:
+  start and end page, the page width as a share of the format's, continuous or one
+  per document page, or Adjust Document (the format becomes the PDF's page, Fixed
+  Size); placed in the view and selected, as Rnote places them, the last choice kept. A Xournal++ `.xopp` opens as a new
   note, as Rnote opens one — its strokes with their pressure, highlighters, text and
   pictures, the pages one below the other — and is saved as an `.rnote` beside it,
   never over it.
