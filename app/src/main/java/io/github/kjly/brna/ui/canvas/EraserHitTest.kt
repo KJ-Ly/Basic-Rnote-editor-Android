@@ -135,7 +135,7 @@ object EraserHitTest {
         return false
     }
 
-    private fun strokeBounds(stroke: Stroke, loosen: Float): Rect {
+    internal fun strokeBounds(stroke: Stroke, loosen: Float): Rect {
         var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
         var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
         for (p in stroke.points) {

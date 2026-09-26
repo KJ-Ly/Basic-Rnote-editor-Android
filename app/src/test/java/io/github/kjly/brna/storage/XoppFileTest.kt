@@ -132,6 +132,20 @@ AAAA
         assertFalse(XoppFile.looksLikeXml(ByteArray(0)))
     }
 
+    @Test
+    fun `a NaN among the numbers is dropped, and a page of NaN size is an error`() {
+        val stroke = XoppFile.parse(
+            "<xournal><page width=\"1\" height=\"1\"><layer><stroke tool=\"pen\" color=\"black\" width=\"1 NaN\">1 2 NaN 3 4</stroke></layer></page></xournal>".toByteArray()
+        ).pages.single().layers.single().strokes.single()
+        assertEquals(listOf(1.0), stroke.width)
+        assertEquals(listOf(1.0 to 2.0, 3.0 to 4.0), stroke.coords)
+    }
+
+    @Test(expected = XoppFile.ParseException::class)
+    fun `a page of NaN size is an error`() {
+        XoppFile.parse("<xournal><page width=\"NaN\" height=\"1\"/></xournal>".toByteArray())
+    }
+
     @Test(expected = XoppFile.ParseException::class)
     fun `a page without a size is an error, as in Rnote`() {
         XoppFile.parse("<xournal><page height=\"1\"/></xournal>".toByteArray())

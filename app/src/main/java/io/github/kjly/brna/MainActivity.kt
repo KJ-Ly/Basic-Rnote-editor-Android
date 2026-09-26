@@ -41,7 +41,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -51,6 +50,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -127,7 +127,9 @@ import io.github.kjly.brna.storage.SettingsManager
 import io.github.kjly.brna.storage.Workspaces
 import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -1189,9 +1191,24 @@ class MainActivity : ComponentActivity() {
             // Rnote's "Pen Sounds": off by default, kept between sessions; the sounds are only
             // loaded while they are on.
             var penSoundsOn by remember { mutableStateOf(SettingsManager.loadPenSounds(this)) }
-            val penSounds = remember(penSoundsOn) { if (penSoundsOn) PenSounds(applicationContext) else null }
-            DisposableEffect(penSounds) {
-                onDispose { penSounds?.release() }
+            // Loaded off the main thread: the pencil's player prepares its recording as it is
+            // made, which is no work for the first frame to wait on.
+            val penSounds by produceState<PenSounds?>(null, penSoundsOn) {
+                if (!penSoundsOn) {
+                    value = null
+                    return@produceState
+                }
+                // Not given up halfway: a player made and then dropped would never be released.
+                val sounds = withContext(NonCancellable + Dispatchers.IO) { PenSounds(applicationContext) }
+                if (!isActive) {
+                    sounds.release()
+                    return@produceState
+                }
+                value = sounds
+                awaitDispose {
+                    value = null
+                    sounds.release()
+                }
             }
             val togglePenSounds: () -> Unit = {
                 penSoundsOn = !penSoundsOn
@@ -1649,21 +1666,28 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch {
                     if (busyMessage != null) return@launch
                     val fileName = if (DocumentUri.isRnote(name)) name else "$name.rnote"
-                    val created = withContext(Dispatchers.IO) {
-                        val uri = FolderBrowser.createNote(this@MainActivity, tree, folderId, fileName)
-                            ?: return@withContext null
-                        // A provider may pick another name when that one is taken.
-                        val actualName = DocumentUri.displayName(this@MainActivity, uri) ?: fileName
-                        val note = NoteDocument(
-                            title = DocumentUri.titleFrom(actualName),
-                            paperStyle = SettingsManager.loadPaperStyle(this@MainActivity)
-                        )
-                        if (FileManager.saveDocumentHashed(this@MainActivity, uri, note, asRnote = true) != null) {
-                            uri
-                        } else {
-                            FolderBrowser.delete(this@MainActivity, uri)
-                            null
+                    // Busy while the file is made, so nothing else starts meanwhile and
+                    // turns the opening of it below away.
+                    busyMessage = "Creating the note…"
+                    val created = try {
+                        withContext(Dispatchers.IO) {
+                            val uri = FolderBrowser.createNote(this@MainActivity, tree, folderId, fileName)
+                                ?: return@withContext null
+                            // A provider may pick another name when that one is taken.
+                            val actualName = DocumentUri.displayName(this@MainActivity, uri) ?: fileName
+                            val note = NoteDocument(
+                                title = DocumentUri.titleFrom(actualName),
+                                paperStyle = SettingsManager.loadPaperStyle(this@MainActivity)
+                            )
+                            if (FileManager.saveDocumentHashed(this@MainActivity, uri, note, asRnote = true) != null) {
+                                uri
+                            } else {
+                                FolderBrowser.delete(this@MainActivity, uri)
+                                null
+                            }
                         }
+                    } finally {
+                        busyMessage = null
                     }
                     if (created == null) {
                         Toast.makeText(this@MainActivity, "Could not create the note there", Toast.LENGTH_LONG).show()

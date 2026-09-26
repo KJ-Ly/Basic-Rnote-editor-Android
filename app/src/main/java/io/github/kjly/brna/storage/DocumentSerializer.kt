@@ -7,6 +7,8 @@ import io.github.kjly.brna.model.LayoutMode
 import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PressureCurve
+import io.github.kjly.brna.model.SegmentCurve
 import io.github.kjly.brna.model.NoteDocument
 import io.github.kjly.brna.model.Stroke
 import io.github.kjly.brna.model.TexturedDistribution
@@ -47,6 +49,9 @@ object DocumentSerializer {
             strokeObj.put("color", stroke.color.toArgb())
             strokeObj.put("width", stroke.strokeWidth.toDouble())
             strokeObj.put("toolType", stroke.toolType.name)
+            // Without these a Marker stroke lost its layer and every stroke its pressure curve.
+            strokeObj.put("pressureCurve", stroke.pressureCurve.apiName)
+            if (stroke.isHighlighter) strokeObj.put("isHighlighter", true)
             stroke.textured?.let { textured ->
                 strokeObj.put("textured", JSONObject().apply {
                     // As text: a u64 seed does not fit JSONObject's numbers.
@@ -62,6 +67,16 @@ object DocumentSerializer {
                 ptObj.put("x", pt.x.toDouble())
                 ptObj.put("y", pt.y.toDouble())
                 ptObj.put("pressure", pt.pressure.toDouble())
+                // The curve the segment to this point takes, if it isn't straight — a
+                // desktop "Curved" stroke or one drawn here with it — else it came back straight.
+                when (val c = pt.curve) {
+                    null -> Unit
+                    is SegmentCurve.Quad -> ptObj.put("quad", JSONArray().put(c.cx.toDouble()).put(c.cy.toDouble()))
+                    is SegmentCurve.Cubic -> ptObj.put(
+                        "cubic",
+                        JSONArray().put(c.c1x.toDouble()).put(c.c1y.toDouble()).put(c.c2x.toDouble()).put(c.c2y.toDouble())
+                    )
+                }
                 pointsArray.put(ptObj)
             }
             strokeObj.put("points", pointsArray)
@@ -145,8 +160,18 @@ object DocumentSerializer {
                         val x = ptObj.optDouble("x", 0.0).toFloat()
                         val y = ptObj.optDouble("y", 0.0).toFloat()
                         val pressure = ptObj.optDouble("pressure", 1.0).toFloat()
-                        val timestamp = ptObj.optLong("timestamp", System.currentTimeMillis())
-                        pointsList.add(InkPoint(x, y, pressure))
+                        val quad = ptObj.optJSONArray("quad")
+                        val cubic = ptObj.optJSONArray("cubic")
+                        val curve = when {
+                            quad != null && quad.length() == 2 ->
+                                SegmentCurve.Quad(quad.getDouble(0).toFloat(), quad.getDouble(1).toFloat())
+                            cubic != null && cubic.length() == 4 -> SegmentCurve.Cubic(
+                                cubic.getDouble(0).toFloat(), cubic.getDouble(1).toFloat(),
+                                cubic.getDouble(2).toFloat(), cubic.getDouble(3).toFloat()
+                            )
+                            else -> null
+                        }
+                        pointsList.add(InkPoint(x, y, pressure, curve))
                     }
                 }
 
@@ -164,6 +189,8 @@ object DocumentSerializer {
                         color = Color(colorInt),
                         strokeWidth = width,
                         toolType = toolType,
+                        isHighlighter = strokeObj.optBoolean("isHighlighter", false),
+                        pressureCurve = PressureCurve.fromApiName(strokeObj.optString("pressureCurve", PressureCurve.DEFAULT.apiName)),
                         textured = textured
                     )
                 )

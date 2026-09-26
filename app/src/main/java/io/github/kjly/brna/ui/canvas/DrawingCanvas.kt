@@ -508,7 +508,9 @@ fun DrawingCanvas(
                 // handed to the app, which switches pens as that button is set to — by default
                 // the S Pen's button erases while held. Only between gestures: a button pressed
                 // while writing counts once the pen lifts, so no stroke is cut in two.
-                if (!isDrawing) syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
+                // A finger has no buttons, and its touch is no sign the pen's were let go.
+                val hasButtons = isStylus || toolType == MotionEvent.TOOL_TYPE_MOUSE
+                if (!isDrawing && hasButtons) syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
                 // The pen's eraser end erases, whatever the buttons say, as Rnote's eraser mode does.
                 val eraserTipInUse = toolType == MotionEvent.TOOL_TYPE_ERASER
 
@@ -1022,7 +1024,7 @@ fun DrawingCanvas(
                         // A temporary pen goes once what was drawn with it is done, and a
                         // button let go while writing counts now.
                         if (wasDrawing) onPenGestureEnd()
-                        syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
+                        if (hasButtons) syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
                         true
                     }
 
@@ -1468,23 +1470,12 @@ private class CachedOutline(val bounds: Rect) {
     var path: Path? = null
 }
 
-/** A stroke's extent with room for its width: enough to tell whether it is in view. */
-private fun strokeBounds(stroke: Stroke): Rect {
-    val points = stroke.points
-    if (points.isEmpty()) return Rect.Zero
-    var left = points[0].x
-    var top = points[0].y
-    var right = left
-    var bottom = top
-    for (p in points) {
-        if (p.x < left) left = p.x
-        if (p.x > right) right = p.x
-        if (p.y < top) top = p.y
-        if (p.y > bottom) bottom = p.y
-    }
-    val margin = stroke.strokeWidth
-    return Rect(left - margin, top - margin, right + margin, bottom + margin)
-}
+/**
+ * A stroke's extent with room for its width: enough to tell whether it is in view. A
+ * curve's control points are in it, so a bulge that alone is on screen is still drawn.
+ */
+private fun strokeBounds(stroke: Stroke): Rect =
+    if (stroke.points.isEmpty()) Rect.Zero else EraserHitTest.strokeBounds(stroke, stroke.strokeWidth)
 
 /**
  * A shape being drawn in several strokes, as far as it has got, as Rnote's builders show

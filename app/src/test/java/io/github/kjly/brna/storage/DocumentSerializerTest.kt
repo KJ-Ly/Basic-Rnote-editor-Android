@@ -5,6 +5,8 @@ import io.github.kjly.brna.model.NoteDocument
 import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PressureCurve
+import io.github.kjly.brna.model.SegmentCurve
 import io.github.kjly.brna.model.Stroke
 import io.github.kjly.brna.model.StrokePoint
 import io.github.kjly.brna.model.ToolType
@@ -68,6 +70,27 @@ class DocumentSerializerTest {
         assertEquals(2.25f, stroke.points[0].y, eps)
         assertEquals(0.4f, stroke.points[0].pressure, eps)
         assertEquals(0.9f, stroke.points[1].pressure, eps)
+    }
+
+    @Test
+    fun `curves, the pressure curve and the marker layer survive a round trip`() {
+        val curved = Stroke(
+            id = "stroke-2",
+            points = listOf(
+                StrokePoint(0f, 0f, 0.5f),
+                StrokePoint(10f, 0f, 0.5f, SegmentCurve.Quad(5f, 8f)),
+                StrokePoint(20f, 10f, 0.5f, SegmentCurve.Cubic(12f, 1f, 18f, 4f)),
+                StrokePoint(30f, 10f, 0.5f)
+            ),
+            color = Color(0x5AFFEB3B),
+            strokeWidth = 12f,
+            isHighlighter = true,
+            pressureCurve = PressureCurve.CONST
+        )
+        val stroke = roundTrip(document.copy(strokes = listOf(curved))).strokes.single()
+        assertEquals(curved.points, stroke.points)
+        assertTrue(stroke.isHighlighter)
+        assertEquals(PressureCurve.CONST, stroke.pressureCurve)
     }
 
     @Test
