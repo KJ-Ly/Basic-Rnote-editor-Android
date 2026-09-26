@@ -53,6 +53,35 @@ class ViewportStateTest {
     }
 
     @Test
+    fun `the Offset Camera tool keeps the point taken hold of under the pen`() {
+        val v = ViewportState(panOffset = Offset(10f, 20f), zoomScale = 2f, displayScale = 1.5f)
+        val grab = v.screenToCanvas(Offset(100f, 100f))
+        val moved = v.offsetTo(grab, Offset(160f, 40f))
+        assertEquals(160f, moved.canvasToScreen(grab).x, 1e-3f)
+        assertEquals(40f, moved.canvasToScreen(grab).y, 1e-3f)
+        assertEquals(2f, moved.zoomScale, 0f)
+    }
+
+    @Test
+    fun `the Zoom tool zooms in dragging up, about where it began, as Rnote's does`() {
+        val v = ViewportState(panOffset = Offset(10f, 20f), zoomScale = 1f, displayScale = 2f)
+        val anchor = Offset(200f, 300f)
+        val point = v.screenToCanvas(anchor)
+        // 40 device px up at 2 px per desktop pixel: 20 desktop pixels, 1 + 20 × 0.005.
+        val zoomed = v.dragZoomed(anchor, -40f)
+        assertEquals(1.1f, zoomed.zoomScale, 1e-5f)
+        assertEquals(anchor.x, zoomed.canvasToScreen(point).x, 1e-3f)
+        assertEquals(anchor.y, zoomed.canvasToScreen(point).y, 1e-3f)
+        assertEquals(0.9f, v.dragZoomed(anchor, 40f).zoomScale, 1e-5f)
+    }
+
+    @Test
+    fun `a Zoom tool step past Rnote's limits leaves the zoom where it is`() {
+        val v = ViewportState(zoomScale = ViewportState.ZOOM_MAX - 0.01f)
+        assertEquals(v, v.dragZoomed(Offset(5f, 5f), -100f))
+    }
+
+    @Test
     fun `update clamps zoom to Rnote's camera limits and leaves pan alone`() {
         val viewport = ViewportState()
         assertEquals(ViewportState.ZOOM_MAX, viewport.update(Offset.Zero, 99f).zoomScale, eps)

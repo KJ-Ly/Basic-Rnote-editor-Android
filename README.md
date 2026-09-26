@@ -62,9 +62,14 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   intersecting path. Select all / deselect / duplicate / delete, drag-to-move,
   scale and rotate handles with an aspect-ratio lock, copy / cut / paste between
   notes, recoloring the selection — its lines and text, or its shapes' fill — and
-  Rnote's Invert Color Brightness, which turns its colors light for dark.
+  Rnote's Invert Color Brightness, which turns its colors light for dark. Paste also
+  takes what another app copied, as Rnote's does: a picture, a PDF (through the import
+  dialog), a Xournal++ file, or text as a new text box; and the same can be dragged
+  onto the note from another app in split screen, landing where it is let go.
 - **Tools**: Rnote's Vertical Space — drag down to open up room, up to close it —
-  and its Laser, a red trail to point with that fades away and is never saved.
+  Offset Camera (drag the page with the pen), Zoom (drag up to zoom in, down to zoom
+  out, about where the drag began) and its Laser, a red trail to point with that
+  fades away and is never saved.
 - **Stylus-aware input**: stylus-only mode by default (finger pans and zooms),
   optional finger drawing, S-Pen Air
   Actions mapped to undo/redo, two-finger pinch-zoom and pan — the zoom blockable, as
@@ -148,8 +153,7 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   They follow the keyboard's layout, so Ctrl+Z is the Z key on a German
   keyboard too.
 
-**Not built**: layers (the stroke list is flat), the Tools pen's other styles
-(Offset Camera, Zoom — pan and pinch do that here).
+**Not built**: layers (the stroke list is flat).
 
 ## Screenshots
 

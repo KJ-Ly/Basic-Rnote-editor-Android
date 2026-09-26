@@ -22,6 +22,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
@@ -56,7 +58,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
@@ -206,7 +212,20 @@ private class Clip(val strokes: List<Stroke>, val natives: List<NativeCanvasElem
  */
 private object SelectionClipboard {
     var clip by mutableStateOf<Clip?>(null)
+
+    /**
+     * When Android's clipboard was last set as the selection was copied here. Still the
+     * same at a paste — the picture of the selection didn't make it there — the copy made
+     * here is the newer one, and it is what is pasted.
+     */
+    var systemClipAtCopy: Long? = null
 }
+
+/** The label of the picture of a selection this app puts on Android's clipboard (see copySelectionImage). */
+private const val OWN_CLIP_LABEL = "Basic Rnote selection"
+
+/** What can be pasted or dropped from another app: what [MainActivity.takeInFile] and a text box take. */
+private val TAKEABLE_TYPES = arrayOf("image/*", "application/pdf", "application/x-xopp", "application/octet-stream", "text/*")
 
 /** Width of a page picture in the page overview, in px. */
 private const val THUMBNAIL_WIDTH_PX = 320
@@ -399,7 +418,13 @@ class MainActivity : ComponentActivity() {
     private var onPdfImported: ((List<NativeVectorImageElement>, Boolean) -> Unit)? = null
 
     /** A PDF picked for import, waiting in Rnote's import dialog: its name and every page's size. */
-    private class PendingPdfImport(val uri: Uri, val fileName: String, val pageSizes: List<Pair<Float, Float>>)
+    private class PendingPdfImport(
+        val uri: Uri,
+        val fileName: String,
+        val pageSizes: List<Pair<Float, Float>>,
+        /** Where it was dropped, in document units; null for Rnote's usual place in the view. */
+        val at: Offset?
+    )
 
     private var pendingPdfImport by mutableStateOf<PendingPdfImport?>(null)
 
@@ -413,9 +438,96 @@ class MainActivity : ComponentActivity() {
     ) { uri -> uri?.let { importFile(it) } }
 
     private fun importFile(uri: Uri) {
-        val type = contentResolver.getType(uri)
-        val name = DocumentUri.displayName(this, uri).orEmpty().lowercase()
-        if (type == "application/pdf" || name.endsWith(".pdf")) importPdf(uri) else insertImage(uri)
+        if (!takeInFile(uri)) insertImage(uri)
+    }
+
+    /**
+     * A file from outside — picked, pasted or dropped — taken in the way Rnote takes one in
+     * (its `open_file_w_dialogs`): a PDF through the import dialog, a picture into the note,
+     * a Xournal++ file as a new note. [at] is where it was dropped, in document units.
+     * False for a file of any other kind.
+     */
+    private fun takeInFile(uri: Uri, mime: String? = null, at: Offset? = null): Boolean {
+        val type = mime?.takeIf { it != "application/octet-stream" } ?: contentResolver.getType(uri)
+        val name = try {
+            DocumentUri.displayName(this, uri).orEmpty().lowercase()
+        } catch (e: RuntimeException) {
+            ""
+        }
+        when {
+            type == "application/pdf" || name.endsWith(".pdf") -> importPdf(uri, at)
+            type == "application/x-xopp" || name.endsWith(".xopp") -> openDocument(uri)
+            // Every picture Android can read, but not a drawing in SVG, which it can't.
+            (type?.startsWith("image/") == true && type != "image/svg+xml") ||
+                name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") -> insertImage(uri, at = at)
+            else -> return false
+        }
+        return true
+    }
+
+    /** Installed by the UI: text pasted or dropped, into the box being typed into or a new one at [Offset]. */
+    private var onTakeText: ((String, Offset?) -> Unit)? = null
+
+    /** Whether Android's clipboard holds something from another app to paste. */
+    private var systemClipAvailable by mutableStateOf(false)
+
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { refreshSystemClip() }
+
+    private fun refreshSystemClip() {
+        val description = try {
+            getSystemService(ClipboardManager::class.java)?.primaryClipDescription
+        } catch (e: RuntimeException) {
+            null
+        }
+        systemClipAvailable = description != null && description.label?.toString() != OWN_CLIP_LABEL &&
+            TAKEABLE_TYPES.any { description.hasMimeType(it) }
+    }
+
+    /**
+     * What a paste takes from another app, or null when the app's own copy is what to paste:
+     * the clipboard holds the picture of it, or has not changed since it was made.
+     */
+    private fun externalClip(): ClipData? {
+        val clipboard = getSystemService(ClipboardManager::class.java) ?: return null
+        return try {
+            val description = clipboard.primaryClipDescription ?: return null
+            if (description.label?.toString() == OWN_CLIP_LABEL) return null
+            if (SelectionClipboard.clip != null && description.timestamp == SelectionClipboard.systemClipAtCopy) return null
+            clipboard.primaryClip
+        } catch (e: RuntimeException) {
+            null
+        }
+    }
+
+    /**
+     * Rnote's `clipboard_paste` for what another app put there: a file (a picture, a PDF, a
+     * Xournal++ file) taken in as [takeInFile] does, else its text as a text box. False when
+     * there was nothing to take.
+     */
+    private fun pasteExternal(clip: ClipData): Boolean {
+        if (clip.itemCount == 0) return false
+        val item = clip.getItemAt(0)
+        item.uri?.let { uri -> return takeInFile(uri, clip.description.getMimeType(0)) }
+        val text = item.coerceToText(this).toString().takeIf { it.isNotBlank() } ?: return false
+        onTakeText?.invoke(text, null)
+        return true
+    }
+
+    /**
+     * Something dragged from another app and let go over the note at [at] (document units),
+     * as Rnote's canvas takes a drop: the first file dropped, or else the text.
+     */
+    private fun takeInDrop(event: android.view.DragEvent, at: Offset): Boolean {
+        val clip = event.clipData ?: return false
+        // Permission to read what another app's files hold, kept until the app closes.
+        requestDragAndDropPermissions(event)
+        for (i in 0 until clip.itemCount) {
+            val uri = clip.getItemAt(i).uri ?: continue
+            return takeInFile(uri, clip.description.getMimeType(0), at)
+        }
+        val text = clip.getItemAt(0).coerceToText(this).toString().takeIf { it.isNotBlank() } ?: return false
+        onTakeText?.invoke(text, at)
+        return true
     }
 
     /**
@@ -441,7 +553,7 @@ class MainActivity : ComponentActivity() {
 
     /** Renders the PDF's pages off the main thread and adds them to the open note. */
     /** Reads the PDF's pages, then asks how to import them, as Rnote's import dialog does. */
-    private fun importPdf(uri: Uri) {
+    private fun importPdf(uri: Uri, at: Offset? = null) {
         if (busyMessage != null) return
         busyMessage = "Reading PDF…"
         lifecycleScope.launch {
@@ -460,7 +572,7 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             val name = DocumentUri.displayName(this@MainActivity, uri) ?: "PDF"
-            pendingPdfImport = PendingPdfImport(uri, name, sizes)
+            pendingPdfImport = PendingPdfImport(uri, name, sizes, at)
         }
     }
 
@@ -470,7 +582,8 @@ class MainActivity : ComponentActivity() {
         if (busyMessage != null) return
         val placed = PdfPageLayout.place(
             request.pageSizes, first, last, prefs,
-            target.formatWidth, target.formatHeight, target.insertX, target.insertY
+            target.formatWidth, target.formatHeight,
+            request.at?.x ?: target.insertX, request.at?.y ?: target.insertY
         )
         busyMessage = "Importing PDF…"
         lifecycleScope.launch {
@@ -497,8 +610,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Installed by the UI: where an image of this many pixels goes in the current view. */
-    private var imagePlacement: ((Int, Int) -> NativeEditing.ImagePlacement)? = null
+    /**
+     * Installed by the UI: where an image of this many pixels goes in the current view —
+     * or, dropped, with its corner at the point given, in document units.
+     */
+    private var imagePlacement: ((Int, Int, Offset?) -> NativeEditing.ImagePlacement)? = null
 
     /** Installed by the UI: adds an inserted image to the open note. */
     private var onImageInserted: ((NativeBitmapElement) -> Unit)? = null
@@ -533,7 +649,7 @@ class MainActivity : ComponentActivity() {
      * Reads the picture off the main thread and adds it to the open note where desktop
      * Rnote would put it (see [NativeEditing.placeImage]).
      */
-    private fun insertImage(uri: Uri, isCameraPhoto: Boolean = false) {
+    private fun insertImage(uri: Uri, isCameraPhoto: Boolean = false, at: Offset? = null) {
         val place = imagePlacement ?: return
         if (busyMessage != null) return
         busyMessage = "Inserting image…"
@@ -552,7 +668,7 @@ class MainActivity : ComponentActivity() {
             }
             busyMessage = null
             val image = pixels?.let {
-                NativeEditing.createImage(it.rgbaBase64, it.width, it.height, place(it.width, it.height))
+                NativeEditing.createImage(it.rgbaBase64, it.width, it.height, place(it.width, it.height, at))
             }
             if (image == null) {
                 Toast.makeText(this@MainActivity, "Could not insert the image", Toast.LENGTH_LONG).show()
@@ -1177,7 +1293,7 @@ class MainActivity : ComponentActivity() {
             } ?: return@launch
             try {
                 getSystemService(ClipboardManager::class.java)
-                    ?.setPrimaryClip(ClipData.newUri(contentResolver, "Selection", uri))
+                    ?.setPrimaryClip(ClipData.newUri(contentResolver, OWN_CLIP_LABEL, uri))
             } catch (e: RuntimeException) {
                 e.printStackTrace()
             }
@@ -1195,8 +1311,11 @@ class MainActivity : ComponentActivity() {
 
     private var onDocumentLoaded: (NoteDocument) -> Unit = {}
 
+    // Compose's drag and drop target (the note taking a drop) is marked experimental.
+    @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener)
         // The first tab, which the note opened or recovered at launch may take over.
         activeTab = newTabId()
         tabOrder.add(activeTab)
@@ -1841,8 +1960,11 @@ class MainActivity : ComponentActivity() {
 
             // ── Inserted images ───────────────────────────────────────────────────
             val hasCamera = remember { packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
-            imagePlacement = { width, height ->
-                val topLeft = viewportState.screenToCanvas(Offset.Zero)
+            imagePlacement = { width, height, at ->
+                // Rnote's `Stroke::IMPORT_OFFSET_DEFAULT`: 32 px on its screen, which is
+                // 32 document units at 100%. A drop puts the corner where it was let go.
+                val offset = IMPORT_OFFSET / viewportState.zoomScale
+                val topLeft = at?.let { it - Offset(offset, offset) } ?: viewportState.screenToCanvas(Offset.Zero)
                 val bottomRight = viewportState.screenToCanvas(
                     Offset(canvasSize.width.toFloat(), canvasSize.height.toFloat())
                 )
@@ -1851,9 +1973,7 @@ class MainActivity : ComponentActivity() {
                 NativeEditing.placeImage(
                     width, height,
                     topLeft.x, topLeft.y, bottomRight.x, bottomRight.y,
-                    // Rnote's `Stroke::IMPORT_OFFSET_DEFAULT`: 32 px on its screen, which is
-                    // 32 document units at 100%.
-                    offset = IMPORT_OFFSET / viewportState.zoomScale,
+                    offset = offset,
                     fixedPageWidth = paperStyle.effectivePageWidthPx.takeIf { fixedWidth && it > 0f },
                     clampToOrigin = layout != LayoutMode.INFINITE,
                     borders = if (toolConfig.respectBorders) {
@@ -1939,6 +2059,39 @@ class MainActivity : ComponentActivity() {
                 putText(session.element, edited)
                 isModified = true
                 textSession = session.copy(element = edited, template = edited ?: base, value = value, undoTaken = true)
+            }
+            // Rnote's `insert_text`: into the box being typed into, at its cursor; else a new box
+            // in the Typewriter's style, where it was dropped or 32 into the view, typed on from
+            // its end.
+            onTakeText = take@{ text, at ->
+                val session = textSession
+                if (session != null) {
+                    val v = session.value
+                    val typed = v.text.replaceRange(v.selection.min, v.selection.max, text)
+                    onTextChange(TextFieldValue(typed, TextRange(v.selection.min + text.length)))
+                    return@take
+                }
+                val corner = at ?: (viewportState.screenToCanvas(Offset.Zero) + Offset(IMPORT_OFFSET, IMPORT_OFFSET))
+                val c = toolConfig.penColor
+                val box = NativeEditing.createText(
+                    text, corner.x, corner.y, toolConfig.textSize,
+                    RnoteNativeColor(c.red, c.green, c.blue, c.alpha),
+                    NativeEditing.typewriterWrapWidth(corner.x, paperStyle.effectivePageWidthPx),
+                    toolConfig.textAlignment.apiName
+                ) ?: return@take
+                pushUndo()
+                redoStack.clear()
+                documentNativeElements = documentNativeElements + box
+                isModified = true
+                penShortcutState.picked()
+                toolConfig = toolConfig.copy(activeTool = ToolType.TYPEWRITER)
+                selectedStrokes.clear()
+                selectedNatives.clear()
+                textSessionCount++
+                textSession = TextSession(
+                    textSessionCount, corner.x, corner.y, box, box,
+                    TextFieldValue(text, TextRange(text.length)), undoTaken = true
+                )
             }
             /** Bold, italic, underline or strikethrough: on the selection, or else for what is typed next. */
             val onToggleTextFormat: (TextToggle) -> Unit = { toggle ->
@@ -2245,12 +2398,30 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 ) { innerPadding ->
+                    // Rnote's drop target: a file or text dragged from another app and let go over
+                    // the note comes in where it was let go.
+                    val dropTarget = remember {
+                        object : DragAndDropTarget {
+                            override fun onDrop(event: DragAndDropEvent): Boolean {
+                                val drag = event.toAndroidDragEvent()
+                                val at = viewportState.screenToCanvas(Offset(drag.x, drag.y - canvasTop))
+                                return takeInDrop(drag, at)
+                            }
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
                             .onSizeChanged { canvasSize = it }
                             .onGloballyPositioned { canvasTop = it.positionInRoot().y }
+                            .dragAndDropTarget(
+                                shouldStartDragAndDrop = { event ->
+                                    val description = event.toAndroidDragEvent().clipDescription
+                                    description != null && TAKEABLE_TYPES.any { description.hasMimeType(it) }
+                                },
+                                target = dropTarget
+                            )
                     ) {
                         DrawingCanvas(
                             toolConfig = toolConfig,
@@ -2501,6 +2672,11 @@ class MainActivity : ComponentActivity() {
                         val copySelection: () -> Unit = {
                             if (selectedStrokes.isNotEmpty() || selectedNatives.isNotEmpty()) {
                                 SelectionClipboard.clip = Clip(selectedStrokes.toList(), selectedNatives.toList())
+                                SelectionClipboard.systemClipAtCopy = try {
+                                    getSystemService(ClipboardManager::class.java)?.primaryClipDescription?.timestamp
+                                } catch (e: RuntimeException) {
+                                    null
+                                }
                                 // And for other apps, as a picture of it.
                                 copySelectionImage(
                                     NoteDocument(
@@ -2549,6 +2725,18 @@ class MainActivity : ComponentActivity() {
                             // Pasting again cascades from here, as a second duplicate would.
                             SelectionClipboard.clip = Clip(newStrokes, newNatives)
                             isModified = true
+                        }
+                        /**
+                         * Rnote's paste: what another app put on the clipboard since the last
+                         * copy here, else the copy made here, which comes in selected.
+                         */
+                        val paste: () -> Unit = paste@{
+                            val external = externalClip()
+                            if (external != null && pasteExternal(external)) return@paste
+                            if (SelectionClipboard.clip != null) {
+                                selectTool(ToolType.SELECTOR)
+                                pasteClipboard()
+                            }
                         }
 
                         val duplicateSelection: () -> Unit = {
@@ -2611,10 +2799,8 @@ class MainActivity : ComponentActivity() {
                                     return@handler false
                                 }
                                 Shortcut.PASTE -> {
-                                    if (SelectionClipboard.clip == null) return@handler false
-                                    // What is pasted comes in selected, so the selector has to be out.
-                                    selectTool(ToolType.SELECTOR)
-                                    pasteClipboard()
+                                    if (SelectionClipboard.clip == null && !systemClipAvailable) return@handler false
+                                    paste()
                                 }
                                 Shortcut.SELECT_ALL -> {
                                     selectTool(ToolType.SELECTOR)
@@ -2649,13 +2835,13 @@ class MainActivity : ComponentActivity() {
                             onDeselectAll = deselectAll,
                             onShapeKindSelected = { kind -> toolConfig = toolConfig.copy(shapeKind = kind) },
                             onEraserModeSelected = { mode -> toolConfig = toolConfig.copy(eraserMode = mode) },
-                            canPaste = SelectionClipboard.clip != null,
+                            canPaste = SelectionClipboard.clip != null || systemClipAvailable,
                             onCopySelection = copySelection,
                             onCutSelection = {
                                 copySelection()
                                 deleteSelection()
                             },
-                            onPaste = pasteClipboard,
+                            onPaste = paste,
                             onLockAspectRatioToggled = {
                                 toolConfig = toolConfig.copy(lockAspectRatio = !toolConfig.lockAspectRatio)
                             },
@@ -3121,6 +3307,17 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             pendingRecovery = withContext(Dispatchers.IO) { Recovery.readAll(this@MainActivity) }
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Only an app with the focus may look at the clipboard; what it holds may be new.
+        if (hasFocus) refreshSystemClip()
+    }
+
+    override fun onDestroy() {
+        getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener)
+        super.onDestroy()
     }
 
     override fun onResume() {

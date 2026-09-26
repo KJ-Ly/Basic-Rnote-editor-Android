@@ -982,20 +982,32 @@ private fun SelectorModeMenu(mode: SelectorMode, onModeSelected: (SelectorMode) 
 // ── Tools ────────────────────────────────────────────────────────────────
 
 /**
- * Rnote's Tools pen: Vertical Space, the default, and the Laser. Its other two styles,
- * Offset Camera and Zoom, are what pan and pinch already do here.
+ * Rnote's Tools pen, its four styles in its order: Vertical Space, the default, Offset
+ * Camera (drag the page with the pen), Zoom (drag up to zoom in, down to zoom out) and
+ * the Laser.
  */
 @Composable
 private fun ToolsConfigPage(mode: ToolsMode, onModeSelected: (ToolsMode) -> Unit) {
     StripIconToggle(Icons.Default.Height, "Vertical Space", selected = mode == ToolsMode.VERTICAL_SPACE, implemented = true) {
         onModeSelected(ToolsMode.VERTICAL_SPACE)
     }
+    StripIconToggle(GeneratedIcons.ToolsOffsetCamera, "Offset Camera", selected = mode == ToolsMode.OFFSET_CAMERA, implemented = true) {
+        onModeSelected(ToolsMode.OFFSET_CAMERA)
+    }
+    StripIconToggle(GeneratedIcons.ToolsZoom, "Zoom", selected = mode == ToolsMode.ZOOM, implemented = true) {
+        onModeSelected(ToolsMode.ZOOM)
+    }
     StripIconToggle(GeneratedIcons.ToolsLaser, "Laser", selected = mode == ToolsMode.LASER, implemented = true) {
         onModeSelected(ToolsMode.LASER)
     }
     StripDivider()
     Text(
-        text = if (mode == ToolsMode.LASER) "Point;\nit fades\naway" else "Drag\ndown to\nmake\nroom",
+        text = when (mode) {
+            ToolsMode.VERTICAL_SPACE -> "Drag\ndown to\nmake\nroom"
+            ToolsMode.OFFSET_CAMERA -> "Drag\nthe page"
+            ToolsMode.ZOOM -> "Drag up\nto zoom\nin, down\nto zoom\nout"
+            ToolsMode.LASER -> "Point;\nit fades\naway"
+        },
         color = BrnaColors.TextSecondaryOnPanel,
         fontSize = 10.sp,
         lineHeight = 12.sp,

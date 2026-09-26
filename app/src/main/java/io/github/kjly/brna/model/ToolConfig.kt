@@ -65,7 +65,8 @@ enum class SelectorMode { POLYGON, RECTANGLE, SINGLE, INTERSECTING_PATH }
  * the Laser — a red trail to point with that fades away and is never saved. Rnote's
  * other two, Offset Camera and Zoom, are what pan and pinch already do on a tablet.
  */
-enum class ToolsMode { VERTICAL_SPACE, LASER }
+/** Rnote's `ToolStyle`s for the Tools pen, in its order. */
+enum class ToolsMode { VERTICAL_SPACE, OFFSET_CAMERA, ZOOM, LASER }
 
 /**
  * Desktop Rnote's brush styles. MARKER reproduces what BRNA used to call the

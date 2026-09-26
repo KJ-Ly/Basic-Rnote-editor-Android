@@ -101,6 +101,25 @@ data class ViewportState(
     }
 
     /**
+     * Rnote's Offset Camera tool: the view moved so the document point [grab] is under the
+     * pen at [screen] — the page taken hold of and dragged.
+     */
+    fun offsetTo(grab: Offset, screen: Offset): ViewportState = copy(panOffset = screen - grab * effectiveScale)
+
+    /**
+     * Rnote's Zoom tool, one step of a drag: [dy] screen px down zooms out, up zooms in, by
+     * `DRAG_ZOOM_MAGN_ZOOM_FACTOR` per desktop pixel, about [anchor] (a screen position,
+     * where the drag began), whose document point stays put. A step past [ZOOM_MIN] or
+     * [ZOOM_MAX] leaves the zoom as it is, as Rnote's does.
+     */
+    fun dragZoomed(anchor: Offset, dy: Float): ViewportState {
+        // A desktop pixel is a 96th of an inch, which is what a display-scale unit is here.
+        val newZoom = zoomScale * (1f - dy / displayScale * DRAG_ZOOM_FACTOR)
+        if (newZoom < ZOOM_MIN || newZoom > ZOOM_MAX) return this
+        return zoomedAround(anchor, newZoom)
+    }
+
+    /**
      * Clamps and returns a new ViewportState with updated zoom and pan.
      */
     fun update(newPan: Offset, newZoom: Float): ViewportState {
@@ -115,6 +134,9 @@ data class ViewportState(
          */
         const val ZOOM_MIN = 0.2f
         const val ZOOM_MAX = 6.0f
+
+        /** Rnote's `Camera::DRAG_ZOOM_MAGN_ZOOM_FACTOR`: the Zoom tool's change per pixel dragged. */
+        const val DRAG_ZOOM_FACTOR = 0.005f
 
         /** Rnote's `RnCanvas::ZOOM_SCROLL_STEP`: one press of a zoom key is 10 %, in or out. */
         const val ZOOM_STEP = 0.1f

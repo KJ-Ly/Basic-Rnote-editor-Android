@@ -338,6 +338,10 @@ fun DrawingCanvas(
     // A vertical-space drag with the Tools pen. Only drawn shifted until the pen lifts, so
     // a long note isn't rebuilt on every frame; the document changes once, at the end.
     var spaceDrag by remember { mutableStateOf<SpaceDrag?>(null) }
+    // Rnote's Offset Camera and Zoom tools while the pen is down: the document point taken
+    // hold of, and the zoom's anchor with the view as it has got so far.
+    var cameraGrab by remember { mutableStateOf<Offset?>(null) }
+    var zoomDrag by remember { mutableStateOf<ZoomDrag?>(null) }
 
     // Rnote's eraser is `width` canvas units across, full stop — no density factor, no
     // 1.5x, no screen-space floor. Those made the tool a different physical size from
@@ -630,6 +634,14 @@ fun DrawingCanvas(
                             }
                         }
 
+                        if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.OFFSET_CAMERA) {
+                            cameraGrab = Offset(x, y)
+                            return@pointerInteropFilter true
+                        }
+                        if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.ZOOM) {
+                            zoomDrag = ZoomDrag(Offset(screenX, screenY), Offset(screenX, screenY), viewportState)
+                            return@pointerInteropFilter true
+                        }
                         if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.VERTICAL_SPACE) {
                             // What moves is settled here, as in Rnote: dragging back up past
                             // the line must not start picking up what was above it.
@@ -707,6 +719,18 @@ fun DrawingCanvas(
 
                     MotionEvent.ACTION_MOVE -> {
                         if (isDrawing) {
+                            cameraGrab?.let { grab ->
+                                onViewportChanged(viewportState.offsetTo(grab, Offset(screenX, screenY)))
+                                return@pointerInteropFilter true
+                            }
+                            zoomDrag?.let { zoom ->
+                                // From the view as the drag has left it: the one passed in may
+                                // not have caught up with the last step yet.
+                                val next = zoom.viewport.dragZoomed(zoom.anchor, screenY - zoom.last.y)
+                                zoomDrag = ZoomDrag(zoom.anchor, Offset(screenX, screenY), next)
+                                onViewportChanged(next)
+                                return@pointerInteropFilter true
+                            }
                             spaceDrag?.let { space ->
                                 val snapOffset: ((Float) -> Float)? = if (toolConfig.snapPositions) {
                                     { v -> snapped(Offset(x, v)).y }
@@ -862,6 +886,8 @@ fun DrawingCanvas(
 
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         val wasDrawing = isDrawing
+                        cameraGrab = null
+                        zoomDrag = null
                         spaceDrag?.let { space ->
                             spaceDrag = null
                             if (action == MotionEvent.ACTION_UP && abs(space.offset) > VerticalSpace.MIN_OFFSET) {
@@ -1399,10 +1425,29 @@ fun DrawingCanvas(
                 }
             }
 
+            // Rnote's Offset Camera and Zoom cursors, in its colours, a fixed size on screen:
+            // the move arrows on the point taken hold of; a dot where the zoom began and a
+            // ring where the pen is.
+            cameraGrab?.let { grab ->
+                val at = viewportState.canvasToScreen(grab)
+                withTransform({ translate(at.x - 8f, at.y - 8f) }) {
+                    drawPath(OFFSET_CAMERA_CURSOR, TOOL_CURSOR_LIGHT, style = CanvasStrokeStyle(width = 2f))
+                    drawPath(OFFSET_CAMERA_CURSOR, TOOL_CURSOR_DARK)
+                }
+            }
+            zoomDrag?.let { zoom ->
+                drawCircle(TOOL_CURSOR_LIGHT, 3.2f, zoom.anchor)
+                drawCircle(TOOL_CURSOR_DARK, 2.4f, zoom.anchor)
+                drawCircle(TOOL_CURSOR_LIGHT, 4f, zoom.last, style = CanvasStrokeStyle(width = 2f))
+                drawCircle(TOOL_CURSOR_DARK, 4f, zoom.last, style = CanvasStrokeStyle(width = 1.4f))
+            }
+
             // 8. Render the brush hover cursor (screen space). The eraser has its own
             // indicator above, drawn in canvas space because its size is a document size.
             hoverOffset?.let { hoverPos ->
                 if (toolConfig.activeTool == ToolType.TOOLS) {
+                    // Only Vertical Space has a line: the other tools draw theirs when used.
+                    if (toolConfig.toolsMode != ToolsMode.VERTICAL_SPACE) return@let
                     // Where the line would go: everything reaching below it moves.
                     drawLine(
                         color = SPACE_THRESHOLD_LINE.copy(alpha = 0.5f),
@@ -1461,6 +1506,20 @@ private class ShortcutInput {
 private const val SAMSUNG_ACTION_PEN_DOWN = 211
 private const val SAMSUNG_ACTION_PEN_UP = 212
 private const val SAMSUNG_ACTION_PEN_MOVE = 213
+
+/** Rnote's Zoom tool on the go: where it began on screen, where the pen was last, and the view it has made. */
+private class ZoomDrag(val anchor: Offset, val last: Offset, val viewport: ViewportState)
+
+/** Rnote's `OffsetCameraTool::CURSOR_PATH`, 16 px square. */
+private val OFFSET_CAMERA_CURSOR: Path by lazy {
+    androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+        "m 8 1.078125 l -3 3 h 2 v 2.929687 h -2.960938 v -2 l -3 3 l 3 3 v -2 h 2.960938 v 2.960938 h -2 l 3 3 l 3 -3 h -2 v -2.960938 h 3.054688 v 2 l 3 -3 l -3 -3 v 2 h -3.054688 v -2.929687 h 2 z m 0 0"
+    ).toPath()
+}
+
+/** The tools' cursor colours: GNOME's brights[1] and darks[3] at alpha 240, as Rnote draws them. */
+private val TOOL_CURSOR_LIGHT = Color(0xF0F6F5F4)
+private val TOOL_CURSOR_DARK = Color(0xF0241F31)
 
 /** A grid's first cell: its corner where the pen went down, and its size and direction. */
 private class GridCell(val start: Offset, val size: Offset)
