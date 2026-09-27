@@ -160,7 +160,13 @@ fun DrawingCanvas(
      */
     onShortcutKey: (ShortcutKey, Boolean) -> ToolType = { _, _ -> toolConfig.activeTool },
     /** Something drawn — by the pen, a mouse or a finger that draws — has ended. */
-    onPenGestureEnd: () -> Unit = {}
+    onPenGestureEnd: () -> Unit = {},
+    /**
+     * Bumped whenever a font is loaded or removed through CustomFonts, so a text box
+     * already laid out in whatever face it fell back to is redrawn in the newly
+     * available one, rather than keeping its stale cached layout.
+     */
+    customFontsVersion: Int = 0
 ) {
     val underlays = remember(nativeElements) { nativeElements.filter(NativeElementRenderer::isUnderlay) }
     val overlays = remember(nativeElements) { nativeElements.filter(NativeElementRenderer::isOverlay) }
@@ -168,6 +174,7 @@ fun DrawingCanvas(
     // replaces only the elements that changed.
     val nativeRenderer = remember { NativeElementRenderer() }
     LaunchedEffect(overlays) { nativeRenderer.retainOnly(overlays) }
+    LaunchedEffect(customFontsVersion) { if (customFontsVersion > 0) nativeRenderer.invalidateText() }
 
     // Pages and images are turned into bitmaps once, off the main thread, one at a time
     // (a PDF page can be megabytes of SVG). Until then a page shows as a blank sheet.

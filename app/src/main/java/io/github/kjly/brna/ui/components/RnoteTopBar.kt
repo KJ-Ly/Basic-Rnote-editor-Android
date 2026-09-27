@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.HighlightAlt
@@ -137,7 +138,9 @@ fun RnoteTopBar(
     onToggleFocusMode: () -> Unit = {},
     /** Rnote's app menu Fullscreen (F11): Android's status and navigation bars put away. */
     fullscreen: Boolean = false,
-    onToggleFullscreen: () -> Unit = {}
+    onToggleFullscreen: () -> Unit = {},
+    /** Fonts loaded from files, standing in for families the tablet's own faces don't cover. */
+    onManageFonts: () -> Unit = {}
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showCanvasMenu by remember { mutableStateOf(false) }
@@ -409,6 +412,14 @@ fun RnoteTopBar(
                             onClick = { showOverflowMenu = false; onTakePhoto() }
                         )
                     }
+                    // Fonts loaded from files, for text boxes in a family Android doesn't
+                    // have installed — the unrooted stand-in for desktop Rnote's system
+                    // font picker.
+                    DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.FontDownload, null) },
+                        text = { Text("Fonts…") },
+                        onClick = { showOverflowMenu = false; onManageFonts() }
+                    )
                     HorizontalDivider()
                     // In Rnote's app menu too; a switch that leaves the menu open to show it.
                     DropdownMenuItem(

@@ -53,6 +53,7 @@ import io.github.kjly.brna.model.TextRun
 import io.github.kjly.brna.model.TextToggle
 import io.github.kjly.brna.model.ViewportState
 import io.github.kjly.brna.render.NativeElementRenderer
+import io.github.kjly.brna.storage.CustomFonts
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -199,15 +200,21 @@ private val CURSOR_KEYS = setOf(
 )
 
 /**
- * Compose's own family for a name Rnote uses. The generic ones resolve weight and slant
- * the way NativeElementRenderer.typeface does; for a family the tablet doesn't have — a
- * desktop font like Cantarell — Android falls back to its sans-serif, and so does this.
+ * Compose's own family for a name Rnote uses. A font loaded through [CustomFonts] is
+ * used if one is registered for it, so the Typewriter edits in the same face
+ * [NativeElementRenderer.typeface] draws it in. Otherwise the generic families resolve
+ * weight and slant the way NativeElementRenderer.typeface does; for a family the tablet
+ * doesn't have and no font was loaded for — a desktop font like Cantarell — Android
+ * falls back to its sans-serif, and so does this.
  */
-private fun composeFamily(name: String): FontFamily = when (name.lowercase()) {
-    "serif" -> FontFamily.Serif
-    "monospace", "mono" -> FontFamily.Monospace
-    "cursive" -> FontFamily.Cursive
-    else -> FontFamily.SansSerif
+private fun composeFamily(name: String): FontFamily {
+    CustomFonts.get(name)?.let { return FontFamily(it) }
+    return when (name.lowercase()) {
+        "serif" -> FontFamily.Serif
+        "monospace", "mono" -> FontFamily.Monospace
+        "cursive" -> FontFamily.Cursive
+        else -> FontFamily.SansSerif
+    }
 }
 
 /**
