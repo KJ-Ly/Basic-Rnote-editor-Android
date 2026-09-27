@@ -136,6 +136,7 @@ import io.github.kjly.brna.storage.DocumentUri
 import io.github.kjly.brna.storage.FileManager
 import io.github.kjly.brna.storage.FolderBrowser
 import io.github.kjly.brna.storage.FolderListing
+import io.github.kjly.brna.storage.FontNameReader
 import io.github.kjly.brna.storage.ImageImport
 import io.github.kjly.brna.storage.NativeEditing
 import io.github.kjly.brna.storage.PdfImporter
@@ -727,8 +728,41 @@ class MainActivity : ComponentActivity() {
     ) { uri ->
         uri?.let {
             pendingFontUri = it
-            pendingFontSuggestedName = DocumentUri.titleFrom(DocumentUri.displayName(this, it) ?: it.lastPathSegment ?: "Font")
+            val fileTitle = DocumentUri.titleFrom(DocumentUri.displayName(this, it) ?: it.lastPathSegment ?: "Font")
+            // Read the family straight out of the font file's own name table when we
+            // can; a name typed by hand only if that fails (an unsupported container,
+            // or a file that isn't really a font).
+            pendingFontSuggestedName = detectFontFamily(it) ?: fileTitle
         }
+    }
+
+    /**
+     * The family name embedded in [uri]'s own font data, or null if it can't be read —
+     * the file is larger than fonts reasonably get, isn't a font at all, or is a
+     * container FontNameReader doesn't understand. Reads the whole file into memory,
+     * which is fine for a font (typically well under a megabyte, rarely more than a
+     * few); the cap below is just a guard against reading something enormous by mistake.
+     */
+    private fun detectFontFamily(uri: Uri): String? {
+        val cap = 20 * 1024 * 1024
+        val bytes = try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(64 * 1024)
+                var total = 0
+                while (true) {
+                    val read = input.read(chunk)
+                    if (read < 0) break
+                    total += read
+                    if (total > cap) return null
+                    buffer.write(chunk, 0, read)
+                }
+                buffer.toByteArray()
+            }
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        return FontNameReader.familyName(bytes)
     }
 
     /** Registers the font just picked under [family], and refreshes what draws it. */

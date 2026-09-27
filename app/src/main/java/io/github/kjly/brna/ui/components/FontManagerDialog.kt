@@ -116,9 +116,11 @@ fun FontManagerDialog(
 }
 
 /**
- * Asks which family a just-picked font file should stand in for, prefilled with its
- * file name (without extension) — the family a document names it by is what has to be
- * typed here, since Android can't be asked to read a font's own name table.
+ * Asks which family a just-picked font file should stand in for, prefilled with the
+ * name read out of the file's own `name` table by [FontNameReader] where that
+ * succeeds, or the file's own name otherwise. The note might still name the family
+ * slightly differently (a subsetted or renamed font, say), so this stays editable
+ * rather than importing straight away.
  */
 @Composable
 fun NameFontDialog(
@@ -133,9 +135,10 @@ fun NameFontDialog(
         text = {
             Column {
                 Text(
-                    "Enter the font family exactly as the note uses it (e.g. the name shown " +
-                        "in desktop Rnote's font picker). Any text box asking for this family " +
-                        "will be drawn with the file just picked.",
+                    "The family name embedded in the font file has been filled in below where " +
+                        "it could be read. Check it matches what the note uses (desktop Rnote's " +
+                        "font picker shows it) and adjust it if not — any text box asking for " +
+                        "this family will be drawn with the file just picked.",
                     fontSize = 13.sp,
                     color = Color.Gray
                 )
