@@ -156,7 +156,12 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
 - **View**: Rnote's canvas menu — zoom out, reset and in, Zoom to Page Width, and
   Rnote 0.15's Zoom to Real Size, which shows the page as large as it is printed — its
   Focus Mode, which puts the pen picker, the colors and the pen settings away, and
-  Fullscreen, which hides Android's bars.
+  Fullscreen, which hides Android's bars. The view goes as far as Rnote's camera lets
+  it: an inch past the pages of a Fixed Size document, past a Continuous Vertical
+  one's width and a page below what is on it, past a Semi Infinite one's top and left
+  edge only, and anywhere on an Infinite one — so nothing is written where Rnote can't
+  scroll to. What is pasted or imported without being dropped somewhere lands where
+  Rnote puts it: in the view, never before the document's origin.
 - **Keyboard shortcuts** for a hardware keyboard, Rnote's own: Ctrl+Z / Ctrl+Shift+Z
   (and Ctrl+Y), Ctrl+S / Ctrl+Shift+S, Ctrl+O, Ctrl+N, Ctrl+P, Ctrl+Shift+I,
   Ctrl+L, Ctrl+Shift+O, Ctrl+Shift+P, Ctrl+Shift+A / Ctrl+Shift+R for pages, F11,

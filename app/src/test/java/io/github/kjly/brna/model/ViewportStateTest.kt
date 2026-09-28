@@ -229,4 +229,53 @@ class ViewportStateTest {
         // A format of no dpi is none to zoom to.
         assertEquals(viewport, viewport.zoomedToRealSize(1600f, 2400f, 0f))
     }
+
+    // A4 at 96 dpi, as Rnote makes it.
+    private val a4w = 793.7f
+    private val a4h = 1122.5f
+
+    @Test
+    fun `a Fixed Size document keeps the view to its pages and an inch around them`() {
+        val bounds = ViewportState.boundsFor(LayoutMode.FIXED_SIZE, a4w, a4h, fixedPages = 2, contentHeight = 0f)
+        assertEquals(ViewBounds(0f, 0f, a4w, a4h * 2), bounds)
+        // 2 device px per desktop px: the overshoot is 192 px of the panel.
+        val view = ViewportState(zoomScale = 1f, displayScale = 2f)
+        // Dragged far up and left: stops with the overshoot above and before the page.
+        assertOffsetEquals(Offset(192f, 192f), view.copy(panOffset = Offset(5000f, 5000f)).clampedTo(bounds, 1000f, 800f).panOffset)
+        // Far down and right: the last of the pages and the overshoot after them at the view's far edge.
+        val end = view.copy(panOffset = Offset(-99999f, -99999f)).clampedTo(bounds, 1000f, 800f)
+        assertEquals(1000f, end.canvasToScreen(Offset(a4w, 0f)).x + 192f, eps)
+        assertEquals(800f, end.canvasToScreen(Offset(0f, a4h * 2)).y + 192f, eps)
+        // Anywhere in between is left as it is.
+        val inside = view.copy(panOffset = Offset(-300f, -900f))
+        assertEquals(inside, inside.clampedTo(bounds, 1000f, 800f))
+    }
+
+    @Test
+    fun `a page narrower than the view sits at its left, the overshoot before it, as in Rnote`() {
+        val bounds = ViewportState.boundsFor(LayoutMode.FIXED_SIZE, a4w, a4h, fixedPages = 1, contentHeight = 0f)
+        val view = ViewportState(panOffset = Offset(700f, 0f), zoomScale = 0.2f, displayScale = 2f)
+        assertEquals(192f, view.clampedTo(bounds, 3000f, 2000f).panOffset.x, eps)
+    }
+
+    @Test
+    fun `Semi Infinite bounds only the top and the left`() {
+        val bounds = ViewportState.boundsFor(LayoutMode.SEMI_INFINITE, a4w, a4h, fixedPages = 1, contentHeight = 0f)
+        val view = ViewportState(zoomScale = 1.5f, displayScale = 2.75f)
+        val over = 96f * 2.75f
+        assertOffsetEquals(Offset(over, over), view.copy(panOffset = Offset(4000f, 4000f)).clampedTo(bounds, 1600f, 2400f).panOffset)
+        val far = view.copy(panOffset = Offset(-1e6f, -1e6f))
+        assertEquals(far, far.clampedTo(bounds, 1600f, 2400f))
+    }
+
+    @Test
+    fun `Continuous Vertical reaches a page past what is on it, Infinite anywhere`() {
+        val bounds = ViewportState.boundsFor(LayoutMode.CONTINUOUS_VERTICAL, a4w, a4h, fixedPages = 1, contentHeight = 3000f)
+        assertEquals(ViewBounds(0f, 0f, a4w, 3000f + a4h), bounds)
+        assertEquals(null, ViewportState.boundsFor(LayoutMode.INFINITE, a4w, a4h, 1, 0f))
+        val far = ViewportState(panOffset = Offset(1e6f, -1e6f))
+        assertEquals(far, far.clampedTo(null, 1600f, 2400f))
+        // No page to go by, no bounds.
+        assertEquals(null, ViewportState.boundsFor(LayoutMode.FIXED_SIZE, 0f, 0f, 1, 0f))
+    }
 }

@@ -3,6 +3,12 @@ package io.github.kjly.brna.model
 import androidx.compose.ui.geometry.Offset
 import kotlin.math.floor
 
+/**
+ * The document's extent as it bounds the view, in document units (see
+ * [ViewportState.boundsFor]); a null side is one the document grows towards without end.
+ */
+data class ViewBounds(val minX: Float?, val minY: Float?, val maxX: Float?, val maxY: Float?)
+
 data class ViewportState(
     val panOffset: Offset = Offset.Zero,
     /** User-facing zoom, the number shown as a percentage in the top bar. */
@@ -132,6 +138,27 @@ data class ViewportState(
     }
 
     /**
+     * Rnote's `Camera::set_offset`: the view kept to the document and Rnote's overshoot
+     * around it — [OVERSHOOT] on a 96 dpi desktop, so an inch of the panel here — on the
+     * sides [bounds] has. A document narrower or shorter than the view sits at its top or
+     * left, the overshoot before it, as Rnote's does. Null bounds leave the view as it is.
+     */
+    fun clampedTo(bounds: ViewBounds?, viewportWidthPx: Float, viewportHeightPx: Float): ViewportState {
+        if (bounds == null) return this
+        val over = OVERSHOOT * displayScale
+        val scale = effectiveScale
+        // Rnote's offset is where the view's corner is on the zoomed document: -pan here.
+        fun axis(offset: Float, min: Float?, max: Float?, size: Float): Float {
+            val lower = min?.let { it * scale - over } ?: Float.NEGATIVE_INFINITY
+            val upper = max?.let { it * scale + over } ?: Float.POSITIVE_INFINITY
+            return offset.coerceIn(lower, maxOf(upper - size, lower))
+        }
+        val x = axis(-panOffset.x, bounds.minX, bounds.maxX, viewportWidthPx)
+        val y = axis(-panOffset.y, bounds.minY, bounds.maxY, viewportHeightPx)
+        return if (x == -panOffset.x && y == -panOffset.y) this else copy(panOffset = Offset(-x, -y))
+    }
+
+    /**
      * Clamps and returns a new ViewportState with updated zoom and pan.
      */
     fun update(newPan: Offset, newZoom: Float): ViewportState {
@@ -155,6 +182,36 @@ data class ViewportState(
 
         /** Rnote's `Camera::OVERSHOOT_HORIZONTAL`, in document units: the room beside a page fitted to the width. */
         const val FIT_WIDTH_OVERSHOOT = 96f
+
+        /**
+         * Rnote's `Camera::OVERSHOOT_HORIZONTAL` and `_VERTICAL` as its camera uses them, in
+         * desktop pixels: how far past the document the view goes (see [clampedTo]).
+         */
+        const val OVERSHOOT = 96f
+
+        /**
+         * Rnote's `surface_mins_maxs`, as far as a layout bounds the view, in document units:
+         * a Fixed Size document is its pages; a Continuous Vertical one a page wide and a
+         * page longer than what is on it, [contentHeight] as Rnote's `calc_height` measures
+         * it; a Semi Infinite one starts at the origin and grows as the view goes right and
+         * down, so only its top and left bound it; an Infinite one grows every way, and
+         * nothing does. Null too without a page to go by.
+         */
+        fun boundsFor(
+            layout: LayoutMode,
+            pageWidthPx: Float,
+            pageHeightPx: Float,
+            fixedPages: Int,
+            contentHeight: Float
+        ): ViewBounds? {
+            if (pageWidthPx <= 0f || pageHeightPx <= 0f) return null
+            return when (layout) {
+                LayoutMode.FIXED_SIZE -> ViewBounds(0f, 0f, pageWidthPx, pageHeightPx * fixedPages.coerceAtLeast(1))
+                LayoutMode.CONTINUOUS_VERTICAL -> ViewBounds(0f, 0f, pageWidthPx, contentHeight.coerceAtLeast(0f) + pageHeightPx)
+                LayoutMode.SEMI_INFINITE -> ViewBounds(0f, 0f, null, null)
+                LayoutMode.INFINITE -> null
+            }
+        }
 
         /**
          * Gap left between the origin and the corner of the screen by

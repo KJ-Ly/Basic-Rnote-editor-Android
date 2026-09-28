@@ -49,6 +49,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -2122,7 +2123,11 @@ class MainActivity : ComponentActivity() {
                     onTextChange(TextFieldValue(typed, TextRange(v.selection.min + text.length)))
                     return@take
                 }
-                val corner = at ?: (viewportState.screenToCanvas(Offset.Zero) + Offset(IMPORT_OFFSET, IMPORT_OFFSET))
+                // Rnote's `determine_stroke_import_pos`: where it was dropped, or into the view
+                // but not before the document's origin, which only an infinite one goes past.
+                val corner = at ?: (viewportState.screenToCanvas(Offset.Zero) + Offset(IMPORT_OFFSET, IMPORT_OFFSET)).let {
+                    if (paperStyle.layoutMode == LayoutMode.INFINITE) it else Offset(maxOf(it.x, 0f), maxOf(it.y, 0f))
+                }
                 val c = toolConfig.penColor
                 val box = NativeEditing.createText(
                     text, corner.x, corner.y, toolConfig.textSize,
@@ -2379,21 +2384,54 @@ class MainActivity : ComponentActivity() {
             }
             // Which of the colour picker's two pads the palette sets; Rnote's starts on the stroke.
             var fillPadActive by remember { mutableStateOf(false) }
+            // Rnote's camera bounds for the layout (see ViewportState.boundsFor). What is on a
+            // Continuous Vertical document is measured only when it is one, and only again
+            // when it changes, not as the view moves.
+            val continuousContentHeight by remember {
+                derivedStateOf {
+                    if (paperStyle.layoutMode != LayoutMode.CONTINUOUS_VERTICAL) {
+                        0f
+                    } else {
+                        ExportLayout.contentBounds(strokes, documentNativeElements)
+                            ?.let { maxOf(it.bottom, 0f) - minOf(it.top, 0f) } ?: 0f
+                    }
+                }
+            }
+            val viewBounds = ViewportState.boundsFor(
+                paperStyle.layoutMode,
+                if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageWidthPx,
+                if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageHeightPx,
+                paperStyle.fixedPages,
+                continuousContentHeight
+            )
+            /**
+             * The view moved by hand — dragged, pinched, zoomed — kept to the document as
+             * Rnote's camera keeps it (see ViewportState.clampedTo).
+             */
+            val moveView: (ViewportState) -> Unit = { moved ->
+                viewportState = moved.clampedTo(viewBounds, canvasSize.width.toFloat(), canvasSize.height.toFloat())
+            }
+            // And again when the view or the document changes size, as Rnote's canvas does.
+            LaunchedEffect(viewBounds, canvasSize) { moveView(viewportState) }
             /** Zoomed by [factor] about the middle of the view, as Rnote's zoom keys do. */
             val zoomBy: (Float) -> Unit = { factor ->
                 val middle = Offset(canvasSize.width / 2f, canvasSize.height / 2f)
-                viewportState = viewportState.zoomedAround(middle, viewportState.zoomScale * factor)
+                moveView(viewportState.zoomedAround(middle, viewportState.zoomScale * factor))
             }
             val zoomFitWidth: () -> Unit = {
-                viewportState = viewportState.fittedToWidth(
-                    canvasSize.width.toFloat(),
-                    canvasSize.height.toFloat(),
-                    if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageWidthPx
+                moveView(
+                    viewportState.fittedToWidth(
+                        canvasSize.width.toFloat(),
+                        canvasSize.height.toFloat(),
+                        if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageWidthPx
+                    )
                 )
             }
             val zoomRealSize: () -> Unit = {
-                viewportState = viewportState.zoomedToRealSize(
-                    canvasSize.width.toFloat(), canvasSize.height.toFloat(), paperStyle.dpi
+                moveView(
+                    viewportState.zoomedToRealSize(
+                        canvasSize.width.toFloat(), canvasSize.height.toFloat(), paperStyle.dpi
+                    )
                 )
             }
 
@@ -2409,15 +2447,17 @@ class MainActivity : ComponentActivity() {
                                 isModified = isModified,
                                 documentTitle = documentTitle,
                                 currentPage = pageGridLabel,
-                                onResetZoom = { viewportState = ViewportState(displayScale = displayScale) },
+                                onResetZoom = { moveView(ViewportState(displayScale = displayScale)) },
                                 // Unlike the zoom reset next to it, this keeps the zoom and
                                 // only moves the view — see ViewportState.returnedToOrigin.
                                 onReturnToOrigin = {
-                                    viewportState = viewportState.returnedToOrigin(
-                                        viewportWidthPx = canvasSize.width.toFloat(),
-                                        // Nothing to centre on when the document has no pages.
-                                        pageWidthPx = if (paperStyle.pageSize.isInfinite) 0f
-                                                      else paperStyle.effectivePageWidthPx
+                                    moveView(
+                                        viewportState.returnedToOrigin(
+                                            viewportWidthPx = canvasSize.width.toFloat(),
+                                            // Nothing to centre on when the document has no pages.
+                                            pageWidthPx = if (paperStyle.pageSize.isInfinite) 0f
+                                                          else paperStyle.effectivePageWidthPx
+                                        )
                                     )
                                 },
                                 onTitleTap = {
@@ -2540,9 +2580,7 @@ class MainActivity : ComponentActivity() {
                             viewportState = viewportState,
                             strokes = strokes,
                             selectedStrokes = selectedStrokes,
-                            onViewportChanged = { newViewport ->
-                                viewportState = newViewport
-                            },
+                            onViewportChanged = moveView,
                             onAddStroke = { newStroke ->
                                 pushUndo()
                                 redoStack.clear()
@@ -2812,13 +2850,19 @@ class MainActivity : ComponentActivity() {
                             )
                             val inView = box[2] >= viewTopLeft.x && box[0] <= viewBottomRight.x &&
                                 box[3] >= viewTopLeft.y && box[1] <= viewBottomRight.y
-                            val dx: Float
-                            val dy: Float
+                            var dx: Float
+                            var dy: Float
                             if (inView || canvasSize.width == 0) {
                                 dx = PASTE_OFFSET; dy = PASTE_OFFSET
                             } else {
                                 dx = (viewTopLeft.x + viewBottomRight.x) / 2f - (box[0] + box[2]) / 2f
                                 dy = (viewTopLeft.y + viewBottomRight.y) / 2f - (box[1] + box[3]) / 2f
+                            }
+                            // Not before the document's origin, which only an infinite one goes
+                            // past, as Rnote places what it pastes.
+                            if (paperStyle.layoutMode != LayoutMode.INFINITE) {
+                                dx = maxOf(dx, -box[0])
+                                dy = maxOf(dy, -box[1])
                             }
                             pushUndo()
                             redoStack.clear()
