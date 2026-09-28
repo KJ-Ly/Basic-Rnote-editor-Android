@@ -4,7 +4,7 @@ An Android note-taking app, built in Kotlin and Jetpack Compose, that reads and
 writes `.rnote` files produced by [the open-source desktop application Rnote](https://github.com/flxzt/rnote).
 
 This app does not currently embed Rnote's Rust engine — it reimplements the parts
-that matter for interoperability (the v0.14 document schema, stroke geometry,
+that matter for interoperability (the v0.14 document schema and 0.15's changes to it, stroke geometry,
 paper patterns, page layout) in pure Kotlin, so that a file drawn on the desktop
 opens on a tablet and a file drawn on the tablet opens back on the desktop.
 
@@ -107,7 +107,10 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   written back byte for byte, and one that is — moved, scaled, recolored, cut
   with the eraser — keeps its curves, since the curve segments of Rnote's
   "Curved" pen path are read, drawn as Rnote draws them, hit by the eraser and the
-  selector where the curve runs, and written back as curves. With Rnote's "Respect
+  selector where the curve runs, and written back as curves. Files from Rnote 0.15,
+  which stores positions in a new layout, open with everything in place; a save
+  writes the 0.14 layout, which Rnote 0.14 reads as its own and 0.15 converts on
+  opening, so the same note works on both. With Rnote's "Respect
   Borders When Pasting", an inserted image stays clear of the next page border. Autosave, crash recovery, a warning before overwriting a file
   that changed elsewhere (save a copy, overwrite, or load the other version) —
   judged by the file's content, so a sync that only touches its time is no

@@ -269,12 +269,14 @@ object RnoteNativeParser {
             element = when (reader.nextName()) {
                 // A brush stroke keeps the text it was read from too, written back while
                 // it is unchanged; see RnoteStrokeSource.
-                "brushstroke" -> fromTree(reader) { r, tree -> parseBrushStroke(r)?.copy(raw = tree.toString()) }
-                // Text, images and shapes keep the element exactly as read, and a save
-                // writes that back; editing changes it along with the fields (NativeEditing).
-                "textstroke"  -> fromTree(reader) { r, tree -> parseTextStroke(r)?.copy(raw = tree) }
-                "bitmapimage" -> fromTree(reader) { r, tree -> parseBitmapImage(r)?.copy(raw = tree) }
-                "shapestroke" -> fromTree(reader) { r, tree ->
+                "brushstroke" -> fromTree(reader, {}) { r, tree -> parseBrushStroke(r)?.copy(raw = tree.toString()) }
+                // Text, images and shapes keep the element as read, and a save writes that
+                // back; editing changes it along with the fields (NativeEditing). Rnote
+                // 0.15's positions are put in 0.14's layout first, which is the one the
+                // file is written in (RnoteAffines).
+                "textstroke"  -> fromTree(reader, RnoteAffines::textStroke) { r, tree -> parseTextStroke(r)?.copy(raw = tree) }
+                "bitmapimage" -> fromTree(reader, RnoteAffines::bitmapImage) { r, tree -> parseBitmapImage(r)?.copy(raw = tree) }
+                "shapestroke" -> fromTree(reader, RnoteAffines::shapeStroke) { r, tree ->
                     when (val el = parseShapeStroke(r)) {
                         is NativeShapeElement -> el.copy(raw = tree)
                         // A legacy freehand "shape" becomes a brush stroke, which this
@@ -461,12 +463,18 @@ object RnoteNativeParser {
     }
 
     /**
-     * Reads the next value as a tree, then parses it from that tree. The tree is what a
-     * save writes back; reading it through [JsonTreeReader] rather than re-serialising it
-     * means a large string (an embedded image's pixels) exists once, not three times.
+     * Reads the next value as a tree, [prepare]s it, then parses it from that tree. The
+     * tree is what a save writes back; reading it through [JsonTreeReader] rather than
+     * re-serialising it means a large string (an embedded image's pixels) exists once,
+     * not three times.
      */
-    private inline fun <T> fromTree(reader: JsonReader, parse: (JsonReader, JsonElement) -> T): T {
+    private inline fun <T> fromTree(
+        reader: JsonReader,
+        prepare: (JsonElement) -> Unit,
+        parse: (JsonReader, JsonElement) -> T
+    ): T {
         val tree = JsonParser.parseReader(reader)
+        prepare(tree)
         return parse(JsonTreeReader(tree), tree)
     }
 
@@ -505,6 +513,7 @@ object RnoteNativeParser {
             when (reader.nextName()) {
                 "text"      -> text   = reader.nextString()
                 "transform" -> parseTransformInto(reader, transform)
+                "affine"    -> parseFlatAffineInto(reader, transform)
                 "text_style" -> {
                     reader.beginObject()
                     while (reader.hasNext()) {
@@ -935,7 +944,11 @@ object RnoteNativeParser {
         return LineShape(x1, y1, x2, y2)
     }
 
-    /** `{"cuboid":{"half_extents":[hx,hy]},"transform":{"affine":[..]}}` */
+    /**
+     * `{"cuboid":{"half_extents":[hx,hy]},"transform":{"affine":[..]}}`, or Rnote 0.15's
+     * `{"cuboid":…,"affine":[..]}` — which is how a vector image, not kept as a tree,
+     * comes in from a 0.15 file.
+     */
     private fun parseRectShape(reader: JsonReader): RectShape {
         var hx = 0f; var hy = 0f
         val transform = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
@@ -953,6 +966,7 @@ object RnoteNativeParser {
                     reader.endObject()
                 }
                 "transform" -> parseTransformInto(reader, transform)
+                "affine" -> parseFlatAffineInto(reader, transform)
                 else -> reader.skipValue()
             }
         }
@@ -960,7 +974,7 @@ object RnoteNativeParser {
         return RectShape(hx, hy, transform)
     }
 
-    /** `{"radii":[rx,ry],"transform":{"affine":[..]}}` */
+    /** `{"radii":[rx,ry],"transform":{"affine":[..]}}`, or 0.15's `"affine"` as for a rect. */
     private fun parseEllipseShape(reader: JsonReader): EllipseShape {
         var rx = 0f; var ry = 0f
         val transform = floatArrayOf(1f, 0f, 0f, 1f, 0f, 0f)
@@ -969,6 +983,7 @@ object RnoteNativeParser {
             when (reader.nextName()) {
                 "radii"     -> { reader.beginArray(); rx = reader.nextDouble().toFloat(); ry = reader.nextDouble().toFloat(); reader.endArray() }
                 "transform" -> parseTransformInto(reader, transform)
+                "affine"    -> parseFlatAffineInto(reader, transform)
                 else        -> reader.skipValue()
             }
         }
@@ -1277,5 +1292,21 @@ object RnoteNativeParser {
             }
         }
         reader.endObject()
+    }
+
+    /**
+     * Rnote 0.15's `affine`, straight in the element: glam's `DAffine2` as six floats,
+     * [a, b, c, d, tx, ty], which is the model's own layout. See [RnoteAffines].
+     */
+    private fun parseFlatAffineInto(reader: JsonReader, out: FloatArray) {
+        if (reader.peek() != JsonToken.BEGIN_ARRAY) {
+            reader.skipValue()
+            return
+        }
+        val values = ArrayList<Float>(6)
+        reader.beginArray()
+        while (reader.hasNext()) values += reader.nextDouble().toFloat()
+        reader.endArray()
+        RnoteAffines.fromArray(values)?.copyInto(out)
     }
 }
