@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropLandscape
 import androidx.compose.material.icons.filled.CropPortrait
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +35,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -62,6 +65,8 @@ import io.github.kjly.brna.model.MeasureUnit
 import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PenMode
+import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenShortcuts
 import io.github.kjly.brna.model.ShortcutAction
 import io.github.kjly.brna.model.ShortcutKey
@@ -84,6 +89,9 @@ fun PageSettingsSheet(
     /** Rnote's "Button Shortcuts": what each pen and mouse button, and the two-finger long-press, do. */
     penShortcuts: PenShortcuts = PenShortcuts(),
     onPenShortcutsChanged: (PenShortcuts) -> Unit = {},
+    /** Rnote's "Stylus pen modes": the pen each end of the stylus has, and whether it is locked. */
+    penModes: PenModes = PenModes(),
+    onPenModesChanged: (PenModes) -> Unit = {},
     dockedAsSidePanel: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -479,7 +487,42 @@ fun PageSettingsSheet(
             Spacer(modifier = Modifier.height(20.dp))
 
             // ═══════════════════════════════════════════════════════════════════
-            //  SECTION 4: BUTTON SHORTCUTS
+            //  SECTION 4: STYLUS PEN MODES
+            // ═══════════════════════════════════════════════════════════════════
+
+            // Rnote's settings group of the same name (0.15): for each end of the stylus,
+            // its pen and a lock (its RnPenModeRow, a pen and a toggle).
+            SectionHeader("STYLUS PEN MODES", onSurface)
+            Spacer(modifier = Modifier.height(4.dp))
+            PenModeRow(
+                title = "Tool for the pen action",
+                subtitle = "Set/lock the action for the pen",
+                tool = penModes.penTool,
+                locked = penModes.lockPen,
+                onToolChanged = { onPenModesChanged(penModes.withTool(PenMode.PEN, it)) },
+                onLockChanged = { onPenModesChanged(penModes.withLock(PenMode.PEN, it)) },
+                onSurface = onSurface,
+                onSurfaceDim = onSurfaceDim,
+                chipBg = chipBg
+            )
+            PenModeRow(
+                title = "Tool for the eraser action",
+                subtitle = "Set/lock the action for the eraser",
+                tool = penModes.eraserTool,
+                locked = penModes.lockEraser,
+                onToolChanged = { onPenModesChanged(penModes.withTool(PenMode.ERASER, it)) },
+                onLockChanged = { onPenModesChanged(penModes.withLock(PenMode.ERASER, it)) },
+                onSurface = onSurface,
+                onSurfaceDim = onSurfaceDim,
+                chipBg = chipBg
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider(color = if (isDark) Color(0xFF3A3A4A) else Color(0xFFDDE0E5))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ═══════════════════════════════════════════════════════════════════
+            //  SECTION 5: BUTTON SHORTCUTS
             // ═══════════════════════════════════════════════════════════════════
 
             // Rnote's settings group of the same name: for each button, the pen it brings
@@ -578,6 +621,51 @@ private fun ShortcutRow(
                 onSurface = onSurface,
                 chipBg = chipBg
             )
+        }
+    }
+}
+
+/**
+ * One of Rnote's pen mode rows: the end of the stylus, the pen it has, and the lock that
+ * keeps the pen picker from changing it ("Lock the listed tool as the primary tool for
+ * the pen/eraser mode").
+ */
+@Composable
+private fun PenModeRow(
+    title: String,
+    subtitle: String,
+    tool: ToolType,
+    locked: Boolean,
+    onToolChanged: (ToolType) -> Unit,
+    onLockChanged: (Boolean) -> Unit,
+    onSurface: Color,
+    onSurfaceDim: Color,
+    chipBg: Color
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        Text(text = title, fontSize = 14.sp, color = onSurface)
+        Text(text = subtitle, fontSize = 12.sp, color = onSurfaceDim)
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceMenu(
+                value = tool.displayName,
+                options = ToolType.entries.filter { it.isImplemented },
+                label = { it.displayName },
+                onSelected = onToolChanged,
+                onSurface = onSurface,
+                chipBg = chipBg
+            )
+            IconToggleButton(checked = locked, onCheckedChange = onLockChanged) {
+                Icon(
+                    if (locked) Icons.Default.Lock else Icons.Default.LockOpen,
+                    contentDescription = if (locked) "Locked" else "Unlocked",
+                    tint = onSurface
+                )
+            }
         }
     }
 }

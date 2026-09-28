@@ -166,7 +166,8 @@ object RnoteNativeSerializer {
                 RnoteNativeColor(it.red, it.green, it.blue, it.alpha)
             },
             showBorders = doc.paperStyle.showFormatBorders,
-            showOriginIndicator = doc.paperStyle.showOriginIndicator
+            showOriginIndicator = doc.paperStyle.showOriginIndicator,
+            formatDpi = doc.paperStyle.dpi
         )
     }
 
@@ -282,7 +283,7 @@ object RnoteNativeSerializer {
             |  "format":{
             |    "width":${doc.pageWidth},
             |    "height":${doc.pageHeight},
-            |    "dpi":96,
+            |    "dpi":${doc.formatDpi},
             |    "orientation":"$orientation",
             |    "border_color":${doc.borderColor.toJson()},
             |    "show_borders":${doc.showBorders},

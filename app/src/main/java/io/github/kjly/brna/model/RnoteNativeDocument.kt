@@ -222,5 +222,11 @@ data class RnoteNativeDocument(
     val showOriginIndicator: Boolean = true,
 
     /** The Rnote version that wrote the file, as it names it ("0.15.0"); null when read from none. */
-    val fileVersion: String? = null
+    val fileVersion: String? = null,
+
+    /**
+     * Rnote's `config.format.dpi`: how many document units make an inch of the page. What
+     * a size in mm or inches comes to, and what Zoom to Real Size zooms to.
+     */
+    val formatDpi: Float = 96f
 )

@@ -116,10 +116,11 @@ fun RnoteTopBar(
     onTogglePenSounds: () -> Unit = {},
     blockPinchZoom: Boolean = false,
     onToggleBlockPinchZoom: () -> Unit = {},
-    /** Rnote's canvas menu zoom row: out, in, and to the page's width. */
+    /** Rnote's canvas menu zoom row: out, in, to the page's width and to its real size. */
     onZoomOut: () -> Unit = {},
     onZoomIn: () -> Unit = {},
     onZoomFitWidth: () -> Unit = {},
+    onZoomRealSize: () -> Unit = {},
     /** Rnote's page buttons, which only a Fixed Size document has a use for. */
     isFixedSize: Boolean = false,
     canRemovePage: Boolean = false,
@@ -280,6 +281,9 @@ fun RnoteTopBar(
                         IconButton(onClick = onZoomIn) { Icon(Icons.Default.ZoomIn, "Zoom in") }
                         IconButton(onClick = { showCanvasMenu = false; onZoomFitWidth() }) {
                             Icon(GeneratedIcons.ZoomFitWidth, "Zoom to Page Width")
+                        }
+                        IconButton(onClick = { showCanvasMenu = false; onZoomRealSize() }) {
+                            Icon(GeneratedIcons.ZoomRealSize, "Zoom to Real Size")
                         }
                     }
                     HorizontalDivider()

@@ -12,6 +12,7 @@ import android.print.PrintManager
 import android.provider.DocumentsContract
 import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -41,6 +42,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +59,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
@@ -113,6 +119,8 @@ import io.github.kjly.brna.model.TextFormatting
 import io.github.kjly.brna.model.TextToggle
 import io.github.kjly.brna.model.ToolConfig
 import io.github.kjly.brna.model.ToolType
+import io.github.kjly.brna.model.PenMode
+import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenShortcutState
 import io.github.kjly.brna.model.ShortcutKey
 import io.github.kjly.brna.model.UndoHistory
@@ -146,6 +154,7 @@ import io.github.kjly.brna.ui.KeyboardShortcuts
 import io.github.kjly.brna.ui.PenRemote
 import io.github.kjly.brna.ui.Shortcut
 import io.github.kjly.brna.ui.canvas.SelectionManager
+import io.github.kjly.brna.ui.canvas.StylusButtons
 import io.github.kjly.brna.ui.components.ColorPicker
 import io.github.kjly.brna.ui.components.ExportSheet
 import io.github.kjly.brna.ui.components.PageSettingsSheet
@@ -164,6 +173,7 @@ import io.github.kjly.brna.ui.components.NoteTabBar
 import io.github.kjly.brna.ui.components.TextBoxStyle
 import io.github.kjly.brna.ui.components.WorkspaceBrowser
 import io.github.kjly.brna.ui.theme.BabyRnoteTheme
+import io.github.kjly.brna.ui.theme.BrnaColors
 
 /**
  * One undo step: the ink and the desktop elements together, so undoing a Clear Canvas
@@ -559,6 +569,8 @@ class MainActivity : ComponentActivity() {
 
     /** Installed by the UI: Rnote's Ctrl+Space button shortcut went down (true) or came up. */
     private var penShortcutKeyHandler: ((ShortcutKey, Boolean) -> Unit)? = null
+    /** The end of the stylus in a pointer event, whichever view it goes to (see PenModes). */
+    private var penModeHandler: ((PenMode) -> Unit)? = null
     private var ctrlSpaceDown = false
 
     /** Renders the PDF's pages off the main thread and adds them to the open note. */
@@ -1366,9 +1378,13 @@ class MainActivity : ComponentActivity() {
             var paperStyle by remember {
                 mutableStateOf(SettingsManager.loadPaperStyle(this))
             }
+            // Rnote's "Stylus pen modes": the pen each end of the stylus has, and whether it is
+            // locked (see PenModes); the app starts with the tip's, as Rnote does.
+            var penModes by remember { mutableStateOf(SettingsManager.loadPenModes(this)) }
             var toolConfig by remember {
                 mutableStateOf(
                     ToolConfig(
+                        activeTool = penModes.penTool,
                         allowFingerDrawing = SettingsManager.loadAllowFingerDrawing(this),
                         snapPositions = SettingsManager.loadSnapPositions(this),
                         blockPinchZoom = SettingsManager.loadBlockPinchZoom(this),
@@ -1420,6 +1436,14 @@ class MainActivity : ComponentActivity() {
             // pressing one has done to the pen (see PenShortcutState).
             var penShortcuts by remember { mutableStateOf(SettingsManager.loadPenShortcuts(this)) }
             val penShortcutState = remember { PenShortcutState() }
+            // Which end of the stylus is in use; only a stylus changes it, as in Rnote.
+            var penMode by remember { mutableStateOf(PenMode.PEN) }
+            val setPenModes: (PenModes) -> Unit = { modes ->
+                if (modes != penModes) {
+                    penModes = modes
+                    SettingsManager.savePenModes(this@MainActivity, modes)
+                }
+            }
             // Rnote's Focus Mode: the pen picker, the colour picker and the pen settings put
             // away, leaving the page and the headerbar. Neither is kept once the app closes,
             // in Rnote as here.
@@ -2286,6 +2310,46 @@ class MainActivity : ComponentActivity() {
                 penShortcutState.picked()
                 switchTool(newTool)
             }
+            // The end of the stylus in use keeps the pen it has — not a button's temporary
+            // one — however it was picked, as each of Rnote's pen modes keeps its style.
+            val penModeTool = penShortcutState.underlying ?: toolConfig.activeTool
+            LaunchedEffect(penModeTool, penMode) { setPenModes(penModes.withTool(penMode, penModeTool)) }
+            /**
+             * The stylus's other end came into use: Rnote's `change_pen_mode`. The end put
+             * down keeps its pen, the one taken up brings its own out, and a button's
+             * temporary pen goes, as Rnote takes every override off.
+             */
+            penModeHandler = { mode ->
+                if (mode != penMode) {
+                    setPenModes(penModes.withTool(penMode, penShortcutState.underlying ?: toolConfig.activeTool))
+                    penMode = mode
+                    penShortcutState.picked()
+                    switchTool(penModes.tool(mode))
+                }
+            }
+            // Rnote's "Tool Locked" toast, one at a time, with its button to unlock the end in use.
+            val snackbarHostState = remember { SnackbarHostState() }
+            val snackbarScope = rememberCoroutineScope()
+            /** A pen picked in the pen picker: Rnote's `set_pen_style_with_lock`. */
+            val pickTool: (ToolType) -> Unit = { newTool ->
+                when (penModes.pick(penMode, newTool, toolConfig.activeTool)) {
+                    PenModes.Pick.SWITCH -> selectTool(newTool)
+                    PenModes.Pick.NOTHING -> Unit
+                    PenModes.Pick.LOCKED -> snackbarScope.launch {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        val result = snackbarHostState.showSnackbar(
+                            "Tool Locked", actionLabel = "Unlock", duration = SnackbarDuration.Short
+                        )
+                        if (result == SnackbarResult.ActionPerformed) setPenModes(penModes.withLock(penMode, false))
+                    }
+                }
+            }
+            /** Rnote's "Stylus pen modes" rows: the end in use takes its new pen at once. */
+            val changePenModes: (PenModes) -> Unit = { modes ->
+                val before = penModes.tool(penMode)
+                setPenModes(modes)
+                if (modes.tool(penMode) != before) selectTool(modes.tool(penMode))
+            }
             /**
              * Whether a temporary pen from a button still has something on the go, as Rnote's
              * pen reports it has not finished: a selection held, a text box open.
@@ -2327,9 +2391,15 @@ class MainActivity : ComponentActivity() {
                     if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageWidthPx
                 )
             }
+            val zoomRealSize: () -> Unit = {
+                viewportState = viewportState.zoomedToRealSize(
+                    canvasSize.width.toFloat(), canvasSize.height.toFloat(), paperStyle.dpi
+                )
+            }
 
             BabyRnoteTheme(darkTheme = paperStyle.isDarkMode) {
                 Scaffold(
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
                     topBar = {
                         Column {
                             RnoteTopBar(
@@ -2396,6 +2466,7 @@ class MainActivity : ComponentActivity() {
                                 onZoomOut = { zoomBy(1f / (1f + ViewportState.ZOOM_STEP)) },
                                 onZoomIn = { zoomBy(1f + ViewportState.ZOOM_STEP) },
                                 onZoomFitWidth = zoomFitWidth,
+                                onZoomRealSize = zoomRealSize,
                                 isFixedSize = paperStyle.layoutMode == LayoutMode.FIXED_SIZE,
                                 canRemovePage = paperStyle.fixedPages > 1,
                                 onAddPage = addPage,
@@ -2459,6 +2530,8 @@ class MainActivity : ComponentActivity() {
                     ) {
                         DrawingCanvas(
                             toolConfig = toolConfig,
+                            penMode = penMode,
+                            penModes = penModes,
                             onShortcutKey = onShortcutKey,
                             onPenGestureEnd = {
                                 penShortcutState.gestureEnded(shortcutPenBusy())?.let(switchTool)
@@ -2665,24 +2738,28 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // A color picked for the stroke or the fill, by a swatch or a key (1 to 9).
+                        val pickStrokeColor: (Color) -> Unit = { newColor ->
+                            toolConfig = if (toolConfig.activeTool == ToolType.BRUSH && toolConfig.brushStyle == BrushStyle.MARKER) {
+                                toolConfig.copy(highlighterColor = newColor)
+                            } else {
+                                toolConfig.copy(penColor = newColor)
+                            }
+                            recolorSelection(newColor, false)
+                        }
+                        val pickFillColor: (Color) -> Unit = { newColor ->
+                            toolConfig = toolConfig.copy(fillColor = newColor)
+                            recolorSelection(newColor, true)
+                        }
+
                         // Top-center: stroke and fill color + palette (matches Rnote's colorpicker.ui)
                         if (!focusMode) ColorPicker(
                             activeColor = toolConfig.currentActiveColor,
-                            onColorSelected = { newColor ->
-                                toolConfig = if (toolConfig.activeTool == ToolType.BRUSH && toolConfig.brushStyle == BrushStyle.MARKER) {
-                                    toolConfig.copy(highlighterColor = newColor)
-                                } else {
-                                    toolConfig.copy(penColor = newColor)
-                                }
-                                recolorSelection(newColor, false)
-                            },
+                            onColorSelected = pickStrokeColor,
                             fillColor = toolConfig.fillColor,
                             fillPadActive = fillPadActive,
                             onPadSelected = { fill -> fillPadActive = fill },
-                            onFillColorSelected = { newColor ->
-                                toolConfig = toolConfig.copy(fillColor = newColor)
-                                recolorSelection(newColor, true)
-                            },
+                            onFillColorSelected = pickFillColor,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .padding(top = 18.dp)
@@ -2852,6 +2929,12 @@ class MainActivity : ComponentActivity() {
                                 Shortcut.ERASER -> selectTool(ToolType.ERASER)
                                 Shortcut.SELECTOR -> selectTool(ToolType.SELECTOR)
                                 Shortcut.TOOLS -> selectTool(ToolType.TOOLS)
+                                // As a swatch in the color bar is clicked: into the pad that is active.
+                                Shortcut.COLOR_1, Shortcut.COLOR_2, Shortcut.COLOR_3, Shortcut.COLOR_4, Shortcut.COLOR_5,
+                                Shortcut.COLOR_6, Shortcut.COLOR_7, Shortcut.COLOR_8, Shortcut.COLOR_9 -> {
+                                    val color = BrnaColors.PenPalette.getOrNull(shortcut.colorSlot ?: -1) ?: return@handler false
+                                    if (fillPadActive) pickFillColor(color) else pickStrokeColor(color)
+                                }
                             }
                             true
                         }
@@ -2917,7 +3000,7 @@ class MainActivity : ComponentActivity() {
                             toolConfig = toolConfig,
                             canUndo = undoStack.isNotEmpty(),
                             canRedo = redoStack.isNotEmpty(),
-                            onToolSelected = selectTool,
+                            onToolSelected = pickTool,
                             onUndo = { performUndoAction?.invoke() },
                             onRedo = { performRedoAction?.invoke() },
                             modifier = Modifier
@@ -2950,6 +3033,8 @@ class MainActivity : ComponentActivity() {
                                     penShortcuts = it
                                     SettingsManager.savePenShortcuts(this@MainActivity, it)
                                 },
+                                penModes = penModes,
+                                onPenModesChanged = changePenModes,
                                 onDismiss = { showPageSettings = false },
                                 dockedAsSidePanel = !isCompactWidth,
                                 modifier = Modifier.align(Alignment.CenterEnd)
@@ -3381,6 +3466,26 @@ class MainActivity : ComponentActivity() {
 
         /** What Rnote's "Import" takes that this app can: PDFs and pictures. */
         val IMPORTABLE_TYPES = arrayOf("application/pdf", "image/png", "image/jpeg")
+    }
+
+    /**
+     * Rnote's pen modes: the stylus's tip or its eraser end, as it touches or hovers over
+     * anything — the page, and the pen picker, which Rnote watches for this too, so that a
+     * pen picked with the eraser end is that end's.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        notePenMode(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        notePenMode(ev)
+        return super.dispatchGenericMotionEvent(ev)
+    }
+
+    private fun notePenMode(ev: MotionEvent) {
+        if (ev.pointerCount == 0) return
+        StylusButtons.penModeOf(ev.getToolType(0))?.let { penModeHandler?.invoke(it) }
     }
 
     /**

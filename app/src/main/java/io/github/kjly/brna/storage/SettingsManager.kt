@@ -7,6 +7,7 @@ import io.github.kjly.brna.model.LayoutMode
 import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenShortcuts
 
 /**
@@ -38,6 +39,7 @@ object SettingsManager {
     private const val KEY_BLOCK_PINCH_ZOOM   = "blockPinchZoom"
     private const val KEY_RESPECT_BORDERS    = "respectBorders"
     private const val KEY_PEN_SHORTCUTS      = "penShortcuts"
+    private const val KEY_PEN_MODES          = "penModes"
     private const val KEY_PDF_IMPORT         = "pdfImportPrefs"
 
     fun save(
@@ -173,6 +175,19 @@ object SettingsManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_PEN_SHORTCUTS, shortcuts.encode())
+            .apply()
+    }
+
+    /** Rnote's "Stylus pen modes", kept between sessions as Rnote keeps them; Rnote's defaults until changed. */
+    fun loadPenModes(context: Context): PenModes =
+        PenModes.decode(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_PEN_MODES, null)
+        )
+
+    fun savePenModes(context: Context, modes: PenModes) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PEN_MODES, modes.encode())
             .apply()
     }
 

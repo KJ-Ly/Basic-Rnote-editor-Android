@@ -54,6 +54,8 @@ import io.github.kjly.brna.model.NativeShapeElement
 import io.github.kjly.brna.model.NativeTextElement
 import io.github.kjly.brna.model.NativeVectorImageElement
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PenMode
+import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenPathBuilder
 import io.github.kjly.brna.model.RnoteNativeColor
 import io.github.kjly.brna.model.RoughStyle
@@ -105,6 +107,13 @@ private const val DETAIL_SETTLE_MS = 250L
 @Composable
 fun DrawingCanvas(
     toolConfig: ToolConfig,
+    /**
+     * The end of the stylus the app has out, and the pen each end has (see PenModes): a
+     * stylus coming down with its other end is given that end's pen straight away, before
+     * the app has switched to it.
+     */
+    penMode: PenMode = PenMode.PEN,
+    penModes: PenModes = PenModes(),
     paperStyle: PaperStyle,
     viewportState: ViewportState,
     strokes: List<Stroke>,
@@ -515,14 +524,16 @@ fun DrawingCanvas(
                 // A finger has no buttons, and its touch is no sign the pen's were let go.
                 val hasButtons = isStylus || toolType == MotionEvent.TOOL_TYPE_MOUSE
                 if (!isDrawing && hasButtons) syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
-                // The pen's eraser end erases, whatever the buttons say, as Rnote's eraser mode does.
-                val eraserTipInUse = toolType == MotionEvent.TOOL_TYPE_ERASER
+                // The stylus's other end — its eraser end, by default the eraser, or the tip
+                // after it — with its own pen, as Rnote's pen modes have it: the app switches
+                // to that end on this same event, but the page has not seen it yet.
+                val otherEnd = StylusButtons.penModeOf(toolType)?.takeIf { it != penMode }
 
                 // Mid-gesture the latch decides; while hovering, the pen as it is now, so the
                 // cursor switches to the eraser square as soon as the button goes down.
                 val activeTool = when {
                     isDrawing -> gestureTool ?: toolConfig.activeTool
-                    eraserTipInUse -> ToolType.ERASER
+                    otherEnd != null -> penModes.tool(otherEnd)
                     else -> shortcutInput.pendingTool ?: toolConfig.activeTool
                 }
 

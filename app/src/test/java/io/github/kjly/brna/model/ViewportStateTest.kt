@@ -207,4 +207,26 @@ class ViewportStateTest {
         val right = fitted.canvasToScreen(Offset(1600f, 0f)).x
         assertEquals(1600f - right, left, eps)
     }
+
+    @Test
+    fun `zoom to real size makes an inch of the page an inch of the panel`() {
+        // A panel of 264 px per inch; the page a 96 dpi A4, as Rnote makes it.
+        val viewport = ViewportState(panOffset = Offset(-500f, 80f), zoomScale = 2.4f, displayScale = 264f / 96f)
+        val real = viewport.zoomedToRealSize(1600f, 2400f, formatDpi = 96f)
+        assertEquals(1f, real.zoomScale, eps)
+        assertEquals(264f, real.effectiveScale * 96f, eps)
+        // At 300 dpi an inch is 300 units, and still an inch across.
+        val dense = viewport.zoomedToRealSize(1600f, 2400f, formatDpi = 300f)
+        assertEquals(264f, dense.effectiveScale * 300f, eps)
+    }
+
+    @Test
+    fun `zoom to real size keeps what is in the middle of the view there`() {
+        val viewport = ViewportState(panOffset = Offset(-500f, 80f), zoomScale = 2.4f, displayScale = 2.75f)
+        val middle = Offset(800f, 1200f)
+        val before = viewport.screenToCanvas(middle)
+        assertOffsetEquals(before, viewport.zoomedToRealSize(1600f, 2400f, 96f).screenToCanvas(middle))
+        // A format of no dpi is none to zoom to.
+        assertEquals(viewport, viewport.zoomedToRealSize(1600f, 2400f, 0f))
+    }
 }

@@ -101,6 +101,18 @@ data class ViewportState(
     }
 
     /**
+     * Desktop Rnote's Zoom to Real Size (`zoom-real-width` in rnote-ui's actions.rs, 0.15):
+     * the zoom at which the page is as large as it would be printed, about the middle of
+     * the view. Rnote works it out as the monitor's pixels per inch over the format's
+     * [formatDpi]; [displayScale] is already the panel's pixels per inch over [CANVAS_DPI],
+     * so here it is [CANVAS_DPI] over [formatDpi] — 100 % for a format at 96 dpi.
+     */
+    fun zoomedToRealSize(viewportWidthPx: Float, viewportHeightPx: Float, formatDpi: Float): ViewportState {
+        if (formatDpi <= 0f) return this
+        return zoomedAround(Offset(viewportWidthPx / 2f, viewportHeightPx / 2f), CANVAS_DPI / formatDpi)
+    }
+
+    /**
      * Rnote's Offset Camera tool: the view moved so the document point [grab] is under the
      * pen at [screen] — the page taken hold of and dragged.
      */

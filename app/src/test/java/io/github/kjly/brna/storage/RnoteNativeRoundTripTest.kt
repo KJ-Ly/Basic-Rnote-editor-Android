@@ -296,6 +296,21 @@ class RnoteNativeRoundTripTest {
     }
 
     @Test
+    fun `the format's dpi survives a round trip`() {
+        // Written as 96 whatever the file said, which made a page Rnote measured at 300 dpi
+        // three times its size in mm the next time it was opened there.
+        assertEquals(300f, roundTrip(RnoteNativeDocument(formatDpi = 300f)).formatDpi, eps)
+        assertEquals(96f, roundTrip(RnoteNativeDocument()).formatDpi, eps)
+        // Read where a file has none, or none that is one: Rnote's default.
+        val snapshot = """{"version":"0.14.2","data":{"engine_snapshot":{"document":{"config":{"format":""" +
+            """{"width":800.0,"height":1100.0,%s"orientation":"portrait"}},"x":0.0,"y":0.0,"width":800.0,"height":1100.0},""" +
+            """"stroke_components":[{"value":null,"version":0}],"chrono_components":[{"value":null,"version":0}],"chrono_counter":0}}}"""
+        assertEquals(144f, parseJson(snapshot.format(""""dpi":144.0,""")).formatDpi, eps)
+        assertEquals(96f, parseJson(snapshot.format("")).formatDpi, eps)
+        assertEquals(96f, parseJson(snapshot.format(""""dpi":0.0,""")).formatDpi, eps)
+    }
+
+    @Test
     fun `a file carrying no extent falls back to the page format`() {
         // Older files, and anything hand-built, may not carry the document rect at all.
         val parsed = parseJson(

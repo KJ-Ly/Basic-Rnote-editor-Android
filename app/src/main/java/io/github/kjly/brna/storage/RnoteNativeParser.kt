@@ -82,7 +82,8 @@ object RnoteNativeParser {
         val height: Float = 1122.5f,
         val borderColor: RnoteNativeColor = RnoteNativeColor(0.8706f, 0.8667f, 0.851f, 1f),
         val showBorders: Boolean = true,
-        val showOriginIndicator: Boolean = true
+        val showOriginIndicator: Boolean = true,
+        val dpi: Float = 96f
     )
     private data class BgCfg(
         val color: RnoteNativeColor = RnoteNativeColor.WHITE,
@@ -154,7 +155,8 @@ object RnoteNativeParser {
             borderColor = docResult.format.borderColor,
             showBorders = docResult.format.showBorders,
             showOriginIndicator = docResult.format.showOriginIndicator,
-            fileVersion = version
+            fileVersion = version,
+            formatDpi = docResult.format.dpi
         )
     }
 
@@ -194,6 +196,7 @@ object RnoteNativeParser {
         var borderColor = RnoteNativeColor(0.8706f, 0.8667f, 0.851f, 1f)
         var showBorders = true
         var showOrigin = true
+        var dpi = 96f
         reader.beginObject()
         while (reader.hasNext()) {
             when (reader.nextName()) {
@@ -202,11 +205,13 @@ object RnoteNativeParser {
                 "border_color" -> borderColor = parseColor(reader)
                 "show_borders" -> showBorders = reader.nextBoolean()
                 "show_origin_indicator" -> showOrigin = reader.nextBoolean()
+                // Rnote refuses a format of no size; one of no dpi keeps the default.
+                "dpi"    -> dpi = reader.nextDouble().toFloat().takeIf { it > 0f } ?: dpi
                 else     -> reader.skipValue()
             }
         }
         reader.endObject()
-        return FormatConfig(w, h, borderColor, showBorders, showOrigin)
+        return FormatConfig(w, h, borderColor, showBorders, showOrigin, dpi)
     }
 
     private fun parseBgConfig(reader: JsonReader): BgCfg {

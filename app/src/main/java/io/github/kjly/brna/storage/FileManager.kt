@@ -274,7 +274,9 @@ object FileManager {
             customGridColor = bg.patternColor.toComposeColor(),
             showFormatBorders = native.showBorders,
             showOriginIndicator = native.showOriginIndicator,
-            formatBorderColor = native.borderColor.toComposeColor()
+            formatBorderColor = native.borderColor.toComposeColor(),
+            // Written back as it was: a page Rnote measures at 300 dpi stays one.
+            dpi = native.formatDpi
         )
 
         return NoteDocument(
