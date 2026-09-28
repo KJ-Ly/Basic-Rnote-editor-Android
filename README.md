@@ -122,8 +122,12 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   Borders When Pasting", an inserted image stays clear of the next page border. Autosave, crash recovery, a warning before overwriting a file
   that changed elsewhere (save a copy, overwrite, or load the other version) —
   judged by the file's content, so a sync that only touches its time is no
-  alarm — a list of recent notes, and a page overview with thumbnails. Undo
-  reaches back 100 steps, as in Rnote.
+  alarm — a list of recent notes, and a page overview with thumbnails. Before a
+  save writes over a version of a file this app didn't write — as it was opened,
+  or as the laptop saved it since — that version is kept in the app's own
+  storage, the last 5 of each file for a week; "Restore Previous Version…" in the
+  menu brings one back as an unsaved note, and keeps what the file holds then as
+  well. Undo reaches back 100 steps, as in Rnote.
 - **Tabs**: several notes open at once, as in Rnote, each with its own undo
   history and view. Opening a note gives it a tab (or shows its tab if it is
   open already); a tab being left is saved first, and one that can't be is kept

@@ -128,6 +128,7 @@ import io.github.kjly.brna.model.UndoHistory
 import io.github.kjly.brna.model.ViewportState
 import io.github.kjly.brna.model.SnapPositions
 import io.github.kjly.brna.render.NativeElementRenderer
+import io.github.kjly.brna.storage.Backups
 import io.github.kjly.brna.storage.ContentHash
 import io.github.kjly.brna.storage.DocumentUri
 import io.github.kjly.brna.storage.FileManager
@@ -168,6 +169,7 @@ import io.github.kjly.brna.ui.components.ProtectedNoteBanner
 import io.github.kjly.brna.ui.components.RnoteTopBar
 import io.github.kjly.brna.ui.components.PageOverviewDialog
 import io.github.kjly.brna.ui.components.RecentFilesDialog
+import io.github.kjly.brna.ui.components.RestoreVersionDialog
 import io.github.kjly.brna.ui.components.InlineTextEditor
 import io.github.kjly.brna.ui.components.NoteTab
 import io.github.kjly.brna.ui.components.NoteTabBar
@@ -326,10 +328,13 @@ class MainActivity : ComponentActivity() {
     /** Notes recovered from the last session, one per tab they were in, waiting to be offered back. */
     private var pendingRecovery by mutableStateOf<List<Recovery.Pending>>(emptyList())
 
-    /** Set when [incomingDocument] is the open note reloaded from its file. */
+    /** Set when [incomingDocument] is the open note reloaded from its file, or an earlier version of it restored. */
     private var incomingKeepsView = false
 
-    /** Set when [incomingDocument] is a Xournal++ file made into a note: new, and not yet saved anywhere. */
+    /**
+     * Set when [incomingDocument] is unsaved: a Xournal++ file made into a note, not yet saved
+     * anywhere, or an earlier version of the note restored, not yet back in its file.
+     */
     private var incomingUnsaved = false
 
     /**
@@ -838,6 +843,60 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * "Restore Previous Version": [version], a copy [Backups] kept of the open note's file,
+     * in place of what the tab shows, the view left where it was. Unsaved, as Rnote leaves
+     * a note it opened into: it goes back into the file with the next save, and until then
+     * the file is as it was. The note is saved first, and what the file holds then is kept
+     * too, so the version it held before the restore can be brought back the same way.
+     */
+    private fun restoreVersion(version: Backups.Version) {
+        val uri = currentDocumentUri ?: return
+        if (busyMessage != null) return
+        val slot = activeTab
+        lifecycleScope.launch {
+            if (!autosaveNow()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Save the note first — its changes couldn't be written to its file",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            if (busyMessage != null || uri != currentDocumentUri || slot != activeTab) return@launch
+            busyMessage = "Restoring…"
+            val result = withContext(Dispatchers.IO) {
+                writeLock.withLock { Backups.keepNow(this@MainActivity, uri) }
+                try {
+                    FileManager.loadDocumentFromUri(this@MainActivity, Uri.fromFile(version.file))
+                        ?.let { it to DocumentUri.displayName(this@MainActivity, uri) }
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                    null
+                }
+            }
+            busyMessage = null
+            val (loaded, fileName) = result ?: (null to null)
+            // Only what this app wrote over, so never an import or a file from a newer Rnote.
+            if (loaded == null || loaded.imported || loaded.newerRnote != null) {
+                Toast.makeText(this@MainActivity, "Could not restore that version", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            // Another note put on screen meanwhile: this one is not for it.
+            if (uri != currentDocumentUri || slot != activeTab) return@launch
+            val title = fileName?.let(DocumentUri::titleFrom) ?: loaded.document.title
+            saveAsRnote = loaded.isNativeRnote
+            incomingKeepsView = true
+            incomingUnsaved = true
+            incomingDocument = loaded.document.copy(title = title)
+            Toast.makeText(
+                this@MainActivity,
+                "Earlier version restored — the next save puts it back in the file",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     /** Writes back over the file the note came from. False when it has no file yet. */
     private fun saveInPlace(document: NoteDocument, overwriteChanges: Boolean = false): Boolean {
         val target = currentDocumentUri ?: return false
@@ -855,7 +914,11 @@ class MainActivity : ComponentActivity() {
                     pendingConflict = document
                     return@launch
                 }
-                val written = writeLock.withLock { withContext(Dispatchers.IO) { writeDocument(target, document, asRnote) } }
+                val written = writeLock.withLock {
+                    withContext(Dispatchers.IO) {
+                        writeDocument(target, document, asRnote, knownHash, changedSince = overwriteChanges || known == null)
+                    }
+                }
                 busyMessage = null
                 if (written != null) {
                     afterSave(target, document, slot, written)
@@ -1075,7 +1138,7 @@ class MainActivity : ComponentActivity() {
                     e.printStackTrace()
                 }
                 if (target != null && busyMessage == null && !changedElsewhere(target, known, knownHash)) {
-                    writeLock.withLock { writeDocument(target, document, asRnote) }
+                    writeLock.withLock { writeDocument(target, document, asRnote, knownHash, changedSince = known == null) }
                 } else {
                     null
                 }
@@ -1093,9 +1156,21 @@ class MainActivity : ComponentActivity() {
     /**
      * Blocking write; call from [Dispatchers.IO]. The [ContentHash] of what was written, or
      * null on any failure, OOM included.
+     *
+     * What the file held is kept first, unless it is what this app wrote there last (see
+     * [Backups.beforeOverwrite]): [knownHash] is the fingerprint of what it held when last
+     * read or written here, and [changedSince] says it may hold something else by now —
+     * written elsewhere and about to be overwritten anyway, or with no time to tell.
      */
-    private fun writeDocument(uri: Uri, document: NoteDocument, asRnote: Boolean): String? = try {
-        FileManager.saveDocumentHashed(this, uri, document, asRnote)
+    private fun writeDocument(
+        uri: Uri,
+        document: NoteDocument,
+        asRnote: Boolean,
+        knownHash: String? = null,
+        changedSince: Boolean = true
+    ): String? = try {
+        Backups.beforeOverwrite(this, uri, knownHash, changedSince)
+        FileManager.saveDocumentHashed(this, uri, document, asRnote)?.also { Backups.written(this, uri, it) }
     } catch (e: Throwable) {
         e.printStackTrace()
         null
@@ -1505,6 +1580,7 @@ class MainActivity : ComponentActivity() {
             var canvasTop by remember { mutableFloatStateOf(0f) }
             var textSessionCount by remember { mutableIntStateOf(0) }
             var showRecent by remember { mutableStateOf(false) }
+            var showRestore by remember { mutableStateOf(false) }
             var showFiles by remember { mutableStateOf(false) }
             var showPages by remember { mutableStateOf(false) }
             val snapshot = { DocSnapshot(strokes.toList(), documentNativeElements) }
@@ -1624,7 +1700,8 @@ class MainActivity : ComponentActivity() {
                     onDocumentLoaded(pendingDocument)
                     incomingDocument = null
                     if (incomingUnsaved) {
-                        // Imported, not yet anywhere: unsaved, as Rnote marks it.
+                        // Imported, not yet anywhere, or restored, not yet in the file:
+                        // unsaved, as Rnote marks it.
                         incomingUnsaved = false
                         isModified = true
                     }
@@ -2488,6 +2565,8 @@ class MainActivity : ComponentActivity() {
                                 hasSelection = selectedStrokes.isNotEmpty() || selectedNatives.isNotEmpty(),
                                 onShare = shareNote,
                                 onShowRecent = { showRecent = true },
+                                canRestoreVersion = currentDocumentUri != null && protectedFrom == null,
+                                onRestoreVersion = { showRestore = true },
                                 onShowPages = { showPages = true },
                                 onNewDocument = newDocument,
                                 onExport = { showExportSheet = true },
@@ -3279,6 +3358,27 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    // ── Versions kept of the note's file ─────────────────────────
+                    if (showRestore) {
+                        val uri = currentDocumentUri
+                        var versions by remember { mutableStateOf<List<Backups.Version>?>(null) }
+                        LaunchedEffect(uri) {
+                            versions = if (uri == null) {
+                                emptyList()
+                            } else {
+                                withContext(Dispatchers.IO) { Backups.versions(this@MainActivity, uri) }
+                            }
+                        }
+                        RestoreVersionDialog(
+                            versions = versions,
+                            onRestore = { version ->
+                                showRestore = false
+                                restoreVersion(version)
+                            },
+                            onDismiss = { showRestore = false }
+                        )
+                    }
+
                     // ── Page overview ──────────────────────────────────────────────
                     if (showPages) {
                         // The note as it is when the overview opens; its pictures show that.
@@ -3462,6 +3562,7 @@ class MainActivity : ComponentActivity() {
         // is recreated with the same intent after the process was reclaimed.
         if (savedInstanceState == null) {
             if (intent?.action == Intent.ACTION_VIEW) handleViewIntent(intent) else offerRecovery()
+            sweepBackups()
         }
     }
 
@@ -3469,6 +3570,13 @@ class MainActivity : ComponentActivity() {
     private fun offerRecovery() {
         lifecycleScope.launch {
             pendingRecovery = withContext(Dispatchers.IO) { Recovery.readAll(this@MainActivity) }
+        }
+    }
+
+    /** Lets go of kept versions past their week (see [Backups]). */
+    private fun sweepBackups() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            writeLock.withLock { Backups.sweep(this@MainActivity) }
         }
     }
 
