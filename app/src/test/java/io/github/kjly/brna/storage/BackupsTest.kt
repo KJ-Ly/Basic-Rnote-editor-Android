@@ -6,6 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -105,6 +106,18 @@ class BackupsTest {
     fun `a file that can't be read makes no version`() {
         val dir = tmp.newFolder()
         assertNull(Backups.keep(dir, now, null) { null })
+        assertTrue(Backups.list(dir, now).isEmpty())
+    }
+
+    @Test
+    fun `a copy that fails half way leaves nothing behind`() {
+        val dir = tmp.newFolder()
+        val failing = object : java.io.InputStream() {
+            var left = 10
+            override fun read(): Int = if (left-- > 0) 'x'.code else throw java.io.IOException("No space left")
+        }
+        assertThrows(java.io.IOException::class.java) { Backups.keep(dir, now, null) { failing } }
+        assertFalse(File(dir, "incoming.tmp").exists())
         assertTrue(Backups.list(dir, now).isEmpty())
     }
 

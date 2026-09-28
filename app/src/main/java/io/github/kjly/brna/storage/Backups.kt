@@ -126,7 +126,13 @@ object Backups {
         val incoming = File(dir, INCOMING)
         val digest = ContentHash.newDigest()
         val input = open() ?: return null
-        input.use { from -> DigestOutputStream(incoming.outputStream(), digest).use { from.copyTo(it) } }
+        try {
+            input.use { from -> DigestOutputStream(incoming.outputStream(), digest).use { from.copyTo(it) } }
+        } catch (e: Exception) {
+            // A full disk, say: no half a copy left behind taking up room.
+            incoming.delete()
+            throw e
+        }
         val hash = ContentHash.hex(digest)
         if (incoming.length() == 0L || hash == skipHash || hash == list(dir, now).firstOrNull()?.hash) {
             incoming.delete()
