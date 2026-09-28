@@ -219,5 +219,8 @@ data class RnoteNativeDocument(
     // `show_origin_indicator`.
     val borderColor: RnoteNativeColor = RnoteNativeColor(0.8706f, 0.8667f, 0.851f, 1f),
     val showBorders: Boolean = true,
-    val showOriginIndicator: Boolean = true
+    val showOriginIndicator: Boolean = true,
+
+    /** The Rnote version that wrote the file, as it names it ("0.15.0"); null when read from none. */
+    val fileVersion: String? = null
 )

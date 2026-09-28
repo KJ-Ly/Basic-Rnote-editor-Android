@@ -110,7 +110,9 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   selector where the curve runs, and written back as curves. Files from Rnote 0.15,
   which stores positions in a new layout, open with everything in place; a save
   writes the 0.14 layout, which Rnote 0.14 reads as its own and 0.15 converts on
-  opening, so the same note works on both. With Rnote's "Respect
+  opening, so the same note works on both. A file from an Rnote newer than 0.15,
+  whose format the app can't know yet, is shown but never saved over: a banner says
+  so, and Save makes a copy. With Rnote's "Respect
   Borders When Pasting", an inserted image stays clear of the next page border. Autosave, crash recovery, a warning before overwriting a file
   that changed elsewhere (save a copy, overwrite, or load the other version) —
   judged by the file's content, so a sync that only touches its time is no

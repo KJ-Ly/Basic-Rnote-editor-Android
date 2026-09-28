@@ -106,10 +106,12 @@ object RnoteNativeParser {
         var docResult = ParsedDocResult()
         val rawElements = mutableListOf<NativeCanvasElement?>()
         val chronoOrder = mutableListOf<ChronoEntry>()
+        var version: String? = null
 
         reader.beginObject()
         while (reader.hasNext()) {
             when (reader.nextName()) {
+                "version" -> version = if (reader.peek() == JsonToken.STRING) reader.nextString() else { reader.skipValue(); null }
                 "data" -> {
                     reader.beginObject()
                     while (reader.hasNext()) {
@@ -151,7 +153,8 @@ object RnoteNativeParser {
             totalHeight = if (docResult.totalHeight > 0f) docResult.totalHeight else docResult.format.height,
             borderColor = docResult.format.borderColor,
             showBorders = docResult.format.showBorders,
-            showOriginIndicator = docResult.format.showOriginIndicator
+            showOriginIndicator = docResult.format.showOriginIndicator,
+            fileVersion = version
         )
     }
 

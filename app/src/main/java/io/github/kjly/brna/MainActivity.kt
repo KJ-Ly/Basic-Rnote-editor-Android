@@ -154,6 +154,7 @@ import io.github.kjly.brna.storage.PdfPageLayout
 import io.github.kjly.brna.ui.components.PdfImportDialog
 import io.github.kjly.brna.ui.components.PenConfigStrip
 import io.github.kjly.brna.ui.components.PenPicker
+import io.github.kjly.brna.ui.components.ProtectedNoteBanner
 import io.github.kjly.brna.ui.components.RnoteTopBar
 import io.github.kjly.brna.ui.components.PageOverviewDialog
 import io.github.kjly.brna.ui.components.RecentFilesDialog
@@ -187,7 +188,8 @@ private data class ParkedTab(
     val uri: Uri?,
     val knownLastModified: Long?,
     val saveAsRnote: Boolean,
-    val knownContentHash: String? = null
+    val knownContentHash: String? = null,
+    val protectedFrom: String? = null
 )
 
 /** Copied ink and desktop elements. */
@@ -318,6 +320,14 @@ class MainActivity : ComponentActivity() {
 
     /** Set when [incomingDocument] is a Xournal++ file made into a note: new, and not yet saved anywhere. */
     private var incomingUnsaved = false
+
+    /**
+     * The Rnote version the open note's file came from, when that is newer than this app
+     * knows the format of (see [RnoteVersion]); null otherwise. Such a file is shown but
+     * never written back over — the note has no file of its own, as an imported one hasn't,
+     * so autosave keeps only the recovery copy and Save asks where to put a copy.
+     */
+    private var protectedFrom by mutableStateOf<String?>(null)
 
     // ── Tabs ──────────────────────────────────────────────────────────────────
 
@@ -743,6 +753,15 @@ class MainActivity : ComponentActivity() {
                     knownLastModified = null
                     knownContentHash = null
                     incomingUnsaved = true
+                } else if (loaded.newerRnote != null) {
+                    // From an Rnote newer than this app knows the format of: shown, and kept
+                    // among the recent notes, but never saved over — see protectedFrom.
+                    DocumentUri.takePersistablePermission(this@MainActivity, uri)
+                    RecentFiles.add(this@MainActivity, uri, title)
+                    currentDocumentUri = null
+                    pickerStartUri = uri
+                    knownLastModified = null
+                    knownContentHash = null
                 } else {
                     adoptDocumentUri(uri, title)
                     // Set here on the main thread together with incomingDocument, never earlier:
@@ -751,6 +770,7 @@ class MainActivity : ComponentActivity() {
                     knownLastModified = lastModified
                     knownContentHash = loaded.contentHash
                 }
+                protectedFrom = loaded.newerRnote
                 incomingKeepsView = reload
                 incomingDocument = loaded.document.copy(title = title)
                 Toast.makeText(
@@ -759,6 +779,7 @@ class MainActivity : ComponentActivity() {
                         automatic -> "Newer version of $title loaded"
                         reload -> "Loaded their version of $title"
                         loaded.imported -> "Imported: $title — Save keeps it as an .rnote"
+                        loaded.newerRnote != null -> "Opened: $title — from Rnote ${loaded.newerRnote}, it won't be saved over"
                         else -> "Opened: $title"
                     },
                     Toast.LENGTH_SHORT
@@ -1070,7 +1091,8 @@ class MainActivity : ComponentActivity() {
     /** Asks for a destination, then saves there and adopts it. */
     private fun launchSavePicker(document: NoteDocument) {
         pendingDocumentToSave = document
-        val safeTitle = document.title.ifBlank { "MyNote" }
+        // A note from a newer Rnote goes beside its file under a name of its own, not over it.
+        val safeTitle = document.title.ifBlank { "MyNote" }.let { if (protectedFrom != null) "$it (copy)" else it }
         if (saveAsRnote) {
             createRnoteLauncher.launch("$safeTitle.rnote")
         } else {
@@ -1097,6 +1119,8 @@ class MainActivity : ComponentActivity() {
                 // saved under — otherwise the title in the bar and the file on disk disagree.
                 val savedTitle = DocumentUri.displayName(this@MainActivity, uri)?.let(DocumentUri::titleFrom)
                 adoptDocumentUri(uri, savedTitle ?: document.title)
+                // A copy of a note from a newer Rnote is this app's own file, written as it writes one.
+                protectedFrom = null
                 savedTitle?.let { onTitleAdopted?.invoke(it) }
                 afterSave(uri, document, slot, written)
                 Toast.makeText(
@@ -1612,6 +1636,7 @@ class MainActivity : ComponentActivity() {
                 currentDocumentUri = null
                 knownLastModified = null
                 knownContentHash = null
+                protectedFrom = null
             }
 
             // ── Tabs ──────────────────────────────────────────────────────────────
@@ -1630,7 +1655,8 @@ class MainActivity : ComponentActivity() {
                     uri = currentDocumentUri,
                     knownLastModified = knownLastModified,
                     saveAsRnote = saveAsRnote,
-                    knownContentHash = knownContentHash
+                    knownContentHash = knownContentHash,
+                    protectedFrom = protectedFrom
                 )
             }
             val showParked: (ParkedTab) -> Unit = { tab ->
@@ -1652,6 +1678,7 @@ class MainActivity : ComponentActivity() {
                 knownLastModified = tab.knownLastModified
                 knownContentHash = tab.knownContentHash
                 saveAsRnote = tab.saveAsRnote
+                protectedFrom = tab.protectedFrom
                 isModified = tab.isModified
             }
             // An untouched new note: what a note being opened may take the place of.
@@ -2393,6 +2420,13 @@ class MainActivity : ComponentActivity() {
                                     onSelect = { id -> switchTab(id) {} },
                                     onClose = closeTab,
                                     onNew = newDocument
+                                )
+                            }
+                            protectedFrom?.let { version ->
+                                ProtectedNoteBanner(
+                                    version = version,
+                                    darkTheme = paperStyle.isDarkMode,
+                                    onSaveCopy = saveDocumentAs
                                 )
                             }
                         }
