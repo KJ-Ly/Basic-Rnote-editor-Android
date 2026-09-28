@@ -79,8 +79,10 @@ object RnoteNativeSerializer {
             RnoteNativeColor(it.red, it.green, it.blue, it.alpha)
         }
 
-        val pageW = doc.paperStyle.effectivePageWidthPx
-        val pageH = doc.paperStyle.effectivePageHeightPx
+        // A page Rnote can work with, whatever the note has: a note with no pages (the
+        // old "Infinite" size) or a custom size never set is 0 by 0 here.
+        val pageW = RnoteFormat.side(doc.paperStyle.effectivePageWidthPx, RnoteFormat.WIDTH_DEFAULT)
+        val pageH = RnoteFormat.side(doc.paperStyle.effectivePageHeightPx, RnoteFormat.HEIGHT_DEFAULT)
 
         val nativeStrokes: List<NativeCanvasElement> = doc.strokes.map { stroke ->
             // Rnote's `Element::new` clamps pressure to [0, 1] and its serde reader
@@ -277,13 +279,16 @@ object RnoteNativeSerializer {
         // file contradicting itself — desktop believes the field, so its format panel
         // showed Portrait for a page half again as wide as it was tall, and the next
         // orientation toggle there started from the wrong state.
-        val orientation = if (doc.pageWidth > doc.pageHeight) "landscape" else "portrait"
+        // Within Rnote's limits, which it doesn't check a file against (see RnoteFormat).
+        val pageWidth = RnoteFormat.side(doc.pageWidth, RnoteFormat.WIDTH_DEFAULT)
+        val pageHeight = RnoteFormat.side(doc.pageHeight, RnoteFormat.HEIGHT_DEFAULT)
+        val orientation = if (pageWidth > pageHeight) "landscape" else "portrait"
         append("""{
             |"config":{
             |  "format":{
-            |    "width":${doc.pageWidth},
-            |    "height":${doc.pageHeight},
-            |    "dpi":${doc.formatDpi},
+            |    "width":$pageWidth,
+            |    "height":$pageHeight,
+            |    "dpi":${RnoteFormat.dpi(doc.formatDpi)},
             |    "orientation":"$orientation",
             |    "border_color":${doc.borderColor.toJson()},
             |    "show_borders":${doc.showBorders},

@@ -39,6 +39,12 @@ object DocumentSerializer {
         // same defect the .rnote writer had -- only to a different default.
         paperObj.put("layoutMode", document.paperStyle.layoutMode.name)
         paperObj.put("fixedPageCount", document.paperStyle.fixedPages)
+        // The page's orientation, a custom size and the dpi: without them a landscape note
+        // came back portrait, and a custom page 0 by 0.
+        paperObj.put("isLandscape", document.paperStyle.isLandscape)
+        paperObj.put("customWidthPx", document.paperStyle.customWidthPx.toDouble())
+        paperObj.put("customHeightPx", document.paperStyle.customHeightPx.toDouble())
+        paperObj.put("dpi", document.paperStyle.dpi.toDouble())
         root.put("paperStyle", paperObj)
 
         // Strokes Array
@@ -126,7 +132,11 @@ object DocumentSerializer {
                 dotDensityDpi = dotDensityDpi,
                 pageSize = pageSize,
                 layoutMode = layoutMode,
-                fixedPageCount = paperObj.optInt("fixedPageCount", 1)
+                fixedPageCount = paperObj.optInt("fixedPageCount", 1),
+                isLandscape = paperObj.optBoolean("isLandscape", false),
+                customWidthPx = paperObj.optDouble("customWidthPx", 0.0).toFloat().takeIf { it.isFinite() } ?: 0f,
+                customHeightPx = paperObj.optDouble("customHeightPx", 0.0).toFloat().takeIf { it.isFinite() } ?: 0f,
+                dpi = paperObj.optDouble("dpi", 96.0).toFloat().takeIf { it.isFinite() && it > 0f } ?: 96f
             )
         }
 

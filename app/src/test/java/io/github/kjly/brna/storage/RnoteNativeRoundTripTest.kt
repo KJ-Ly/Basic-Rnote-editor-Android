@@ -311,6 +311,24 @@ class RnoteNativeRoundTripTest {
     }
 
     @Test
+    fun `a page of no size is written as Rnote's default, and one too big as its largest`() {
+        // Rnote keeps a format within its limits as the format is set, not as a file is read:
+        // a page 0 high made a Fixed Size document 0/0 tall there.
+        val none = roundTrip(RnoteNativeDocument(pageWidth = 0f, pageHeight = -5f))
+        assertEquals(RnoteFormat.WIDTH_DEFAULT, none.pageWidth, eps)
+        assertEquals(RnoteFormat.HEIGHT_DEFAULT, none.pageHeight, eps)
+        val huge = roundTrip(RnoteNativeDocument(pageWidth = 40000f, pageHeight = 900f, formatDpi = 9000f))
+        assertEquals(RnoteFormat.SIDE_MAX, huge.pageWidth, eps)
+        assertEquals(900f, huge.pageHeight, eps)
+        assertEquals(RnoteFormat.DPI_MAX, huge.formatDpi, eps)
+        // The orientation is that of the page written, not of the one asked for.
+        val json = ByteArrayOutputStream()
+            .also { RnoteNativeSerializer.serialize(it, RnoteNativeDocument(pageWidth = 0f, pageHeight = 0f)) }
+            .let { java.util.zip.GZIPInputStream(ByteArrayInputStream(it.toByteArray())).readBytes().toString(Charsets.UTF_8) }
+        assertTrue(json.contains(""""orientation":"portrait""""))
+    }
+
+    @Test
     fun `a file carrying no extent falls back to the page format`() {
         // Older files, and anything hand-built, may not carry the document rect at all.
         val parsed = parseJson(

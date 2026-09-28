@@ -184,6 +184,21 @@ class DocumentRoundTripTest {
     }
 
     @Test
+    fun `a note without a page size is saved with Rnote's default page`() {
+        // The old "Infinite (No Pages)" size, still in the settings of an earlier install,
+        // and a custom size never set are 0 by 0: written so, Rnote divided by the page.
+        for (style in listOf(
+            PaperStyle(pageSize = PageSize.INFINITE, layoutMode = LayoutMode.FIXED_SIZE),
+            PaperStyle(pageSize = PageSize.CUSTOM, layoutMode = LayoutMode.FIXED_SIZE)
+        )) {
+            val native = RnoteNativeSerializer.bridgeToNative(NoteDocument(title = "No size", paperStyle = style))
+            assertEquals(RnoteFormat.WIDTH_DEFAULT, native.pageWidth, eps)
+            assertEquals(RnoteFormat.HEIGHT_DEFAULT, native.pageHeight, eps)
+            assertEquals(RnoteFormat.HEIGHT_DEFAULT, native.totalHeight, eps)
+        }
+    }
+
+    @Test
     fun `a landscape page comes back landscape, and says so`() {
         // The page is the A3 preset turned on its side, so the file must carry the turned
         // dimensions and call itself landscape — desktop reads the label off the file and
@@ -268,6 +283,20 @@ class DocumentRoundTripTest {
             3,
             DocumentSerializer.parseJson(DocumentSerializer.toJson(threePages)).paperStyle.fixedPages
         )
+    }
+
+    @Test
+    fun `a landscape custom page keeps its size and orientation in the app's own JSON`() {
+        // The JSON kept neither: a landscape note came back portrait, a custom page 0 by 0.
+        val landscape = documentWith(LayoutMode.FIXED_SIZE).let {
+            it.copy(paperStyle = it.paperStyle.copy(isLandscape = true, dpi = 150f))
+        }
+        val reloaded = DocumentSerializer.parseJson(DocumentSerializer.toJson(landscape)).paperStyle
+        assertEquals(PageSize.CUSTOM, reloaded.pageSize)
+        assertTrue(reloaded.isLandscape)
+        assertEquals(1587f, reloaded.effectivePageWidthPx, eps)
+        assertEquals(1123f, reloaded.effectivePageHeightPx, eps)
+        assertEquals(150f, reloaded.dpi, eps)
     }
 
     @Test
