@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.Height
@@ -103,6 +104,8 @@ import io.github.kjly.brna.model.brushFavorite
 import io.github.kjly.brna.model.ToolConfig
 import io.github.kjly.brna.model.ToolType
 import io.github.kjly.brna.model.ToolsMode
+import io.github.kjly.brna.storage.CustomFonts
+import io.github.kjly.brna.storage.NativeEditing
 import io.github.kjly.brna.ui.icons.GeneratedIcons
 import io.github.kjly.brna.ui.theme.BrnaColors
 import kotlinx.coroutines.launch
@@ -151,6 +154,15 @@ fun PenConfigStrip(
     /** The alignment of the text box being typed into, or else of the next one. */
     textAlignment: TextAlignment = TextAlignment.START,
     onTextAlignmentSelected: (TextAlignment) -> Unit = {},
+    /** The font size of the text box's selection (or the whole box with none), or else the next one's. */
+    textFontSize: Float = toolConfig.textSize,
+    /** Sets the size on the box's selection directly, the way [onToggleTextFormat] does — not just the default for new text, unlike [onSizeChanged] for the other tools. */
+    onTextFontSizeChanged: (Float) -> Unit = onSizeChanged,
+    /** The family of the text box's selection (or the whole box with none), or else the next one's. */
+    textFamily: String = toolConfig.textFamily,
+    onTextFontFamilySelected: (String) -> Unit = {},
+    /** Fonts loaded through CustomFonts, offered alongside Rnote's own default family. */
+    customFonts: List<CustomFonts.Entry> = emptyList(),
     /** The Solid brush's pressure curve picked, as in Rnote's brush settings. */
     onPressureCurveSelected: (PressureCurve) -> Unit = {},
     /** The Shaper's line style or line cap picked, as in Rnote's shaper settings. */
@@ -196,8 +208,8 @@ fun PenConfigStrip(
                     onShaperStyleSelected, onRoughFillSelected, onRoughHachureDegreesChanged, onSizeChanged
                 )
                 ToolType.TYPEWRITER -> TypewriterConfigPage(
-                    toolConfig, onSizeChanged, textFormats, textFormatsEnabled, onToggleTextFormat,
-                    textAlignment, onTextAlignmentSelected
+                    toolConfig, onTextFontSizeChanged, textFormats, textFormatsEnabled, onToggleTextFormat,
+                    textAlignment, onTextAlignmentSelected, textFontSize, textFamily, onTextFontFamilySelected, customFonts
                 )
                 ToolType.TOOLS -> ToolsConfigPage(toolConfig, onToolsModeSelected, onSpaceLimitToggled)
             }
@@ -841,7 +853,11 @@ private fun TypewriterConfigPage(
     formatsEnabled: Boolean,
     onToggleFormat: (TextToggle) -> Unit,
     alignment: TextAlignment,
-    onAlignmentSelected: (TextAlignment) -> Unit
+    onAlignmentSelected: (TextAlignment) -> Unit,
+    fontSize: Float,
+    family: String,
+    onFamilySelected: (String) -> Unit,
+    customFonts: List<CustomFonts.Entry>
 ) {
     Text(
         text = "Tap to\ntype",
@@ -857,14 +873,51 @@ private fun TypewriterConfigPage(
         StripIconToggle(icon, label, toggle in formats, formatsEnabled) { onToggleFormat(toggle) }
     }
     AlignmentMenu(alignment, onAlignmentSelected)
+    // Fonts loaded through the Fonts… dialog (see CustomFonts): nothing to switch to
+    // until at least one is loaded, so the strip stays uncluttered until then.
+    if (customFonts.isNotEmpty()) {
+        FontFamilyMenu(family, customFonts, onFamilySelected)
+    }
     StripDivider()
-    // Font size, not a stroke width: small, Rnote's default 32, and large.
+    // Font size, not a stroke width: small, Rnote's default 32, and large. On a
+    // selection this is what the selection itself has (mixed sizes read as the
+    // toolbar's own default, same as Rnote's spin button would settle on one).
     val presets = listOf(
         BrushSizePreset.SMALL to 20f,
         BrushSizePreset.MEDIUM to 32f,
         BrushSizePreset.LARGE to 48f
     )
-    StrokeWidthPicker(toolConfig.currentActiveSize, presets, maxRange = 128f, onSizeChanged, title = "Font Size")
+    StrokeWidthPicker(fontSize, presets, maxRange = 128f, onSizeChanged, title = "Font Size")
+}
+
+/**
+ * The family as one button showing the one in use, the loaded fonts in its menu —
+ * mirrors [AlignmentMenu]'s layout. Sets the family of the box's selection (or the
+ * whole box with none), or else of the next box typed.
+ */
+@Composable
+private fun FontFamilyMenu(family: String, customFonts: List<CustomFonts.Entry>, onSelected: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val isDefault = customFonts.none { it.family.equals(family, ignoreCase = true) }
+    Box {
+        StripIconToggle(Icons.Default.FontDownload, "Font: ${if (isDefault) "Default" else family}", selected = !isDefault, implemented = true) {
+            open = true
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                leadingIcon = { CheckMark(isDefault) },
+                text = { Text("Default") },
+                onClick = { open = false; onSelected(NativeEditing.TEXT_FONT_FAMILY) }
+            )
+            for (font in customFonts) {
+                DropdownMenuItem(
+                    leadingIcon = { CheckMark(font.family.equals(family, ignoreCase = true)) },
+                    text = { Text(font.family) },
+                    onClick = { open = false; onSelected(font.family) }
+                )
+            }
+        }
+    }
 }
 
 /** The typewriter's formatting switches, with their keyboard shortcuts where Rnote has one. */

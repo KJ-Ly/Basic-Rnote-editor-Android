@@ -162,6 +162,8 @@ data class ToolConfig(
     val fillColor: Color = Color.Transparent,
     /** Typewriter font size; Rnote's `TextStyle::FONT_SIZE_DEFAULT` is 32. */
     val textSize: Float = 32f,
+    /** Typewriter font family for new text; matches NativeEditing.TEXT_FONT_FAMILY. */
+    val textFamily: String = "serif",
     /** How new text is aligned; Rnote's typewriter starts at the start. */
     val textAlignment: TextAlignment = TextAlignment.START,
     /** The Shaper's constraints (1:1, level, upright …), off by default as in Rnote. */

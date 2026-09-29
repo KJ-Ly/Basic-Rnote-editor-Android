@@ -257,6 +257,9 @@ private const val PASTE_OFFSET = 20f
 /** How far in from the view's corner an inserted image lands, in document units at 100%. */
 private const val IMPORT_OFFSET = 32f
 
+/** How narrow the right-edge handle may squeeze a text box's wrap width, so a line still fits a word or two. */
+private const val MIN_TEXT_BOX_WIDTH = 60f
+
 /** How long a shared file is kept for the app it went to, in ms. */
 private const val SHARED_FILE_LIFETIME_MS = 60 * 60 * 1000L
 
@@ -280,7 +283,14 @@ private data class TextSession(
     val value: TextFieldValue,
     val pending: Map<TextToggle, Boolean> = emptyMap(),
     /** Whether this box's undo step is on the stack yet: one per box, however much is typed. */
-    val undoTaken: Boolean = false
+    val undoTaken: Boolean = false,
+    /**
+     * The wrap width set by dragging the box's right-edge handle before it has an
+     * element yet (nothing typed into it so far) — there is no box in the document to
+     * carry it otherwise. Once [element] exists the handle sets its `max_width`
+     * directly instead, same as every other box property, and this goes back to null.
+     */
+    val widthOverride: Float? = null
 )
 
 class MainActivity : ComponentActivity() {
@@ -2273,8 +2283,9 @@ class MainActivity : ComponentActivity() {
                     NativeEditing.createText(
                         value.text, session.x, session.y, toolConfig.textSize,
                         RnoteNativeColor(c.red, c.green, c.blue, c.alpha),
-                        NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx),
-                        toolConfig.textAlignment.apiName
+                        session.widthOverride ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx),
+                        toolConfig.textAlignment.apiName,
+                        toolConfig.textFamily
                     )
                 }
                 if (edited == null && session.element == null) {
@@ -2296,7 +2307,11 @@ class MainActivity : ComponentActivity() {
                 }
                 putText(session.element, edited)
                 isModified = true
-                textSession = session.copy(element = edited, template = edited ?: base, value = value, undoTaken = true)
+                textSession = session.copy(
+                    element = edited, template = edited ?: base, value = value, undoTaken = true,
+                    // The box now carries its own width; the handle sets it there from now on.
+                    widthOverride = if (edited != null) null else session.widthOverride
+                )
             }
             // Rnote's `insert_text`: into the box being typed into, at its cursor; else a new box
             // in the Typewriter's style, where it was dropped or 32 into the view, typed on from
@@ -2319,7 +2334,8 @@ class MainActivity : ComponentActivity() {
                     text, corner.x, corner.y, toolConfig.textSize,
                     RnoteNativeColor(c.red, c.green, c.blue, c.alpha),
                     NativeEditing.typewriterWrapWidth(corner.x, paperStyle.effectivePageWidthPx),
-                    toolConfig.textAlignment.apiName
+                    toolConfig.textAlignment.apiName,
+                    toolConfig.textFamily
                 ) ?: return@take
                 pushUndo()
                 redoStack.clear()
@@ -2385,6 +2401,108 @@ class MainActivity : ComponentActivity() {
                 val there = TextFormatting.togglesAt(session.element, selection.min, selection.max)
                 TextToggle.entries.filterTo(mutableSetOf()) { session.pending[it] ?: (it in there) }
             } ?: emptySet()
+
+            /**
+             * Rnote's font size box, on a selection: sets it there directly, the way the
+             * bold/italic switches do rather than only queuing it for the next character
+             * (there is no keyboard shortcut toggling size the way Ctrl+B does, so there is
+             * nothing to keep "pending" for). With no selection, just the default for text
+             * typed next, same as before this had a selection to apply to.
+             */
+            val onTextFontSizeChanged: (Float) -> Unit = { newSize ->
+                toolConfig = toolConfig.updateActiveSize(newSize)
+                val session = textSession
+                val element = session?.element
+                if (session != null && element != null && !session.value.selection.collapsed) {
+                    if (!session.undoTaken) {
+                        pushUndo()
+                        redoStack.clear()
+                    }
+                    val selection = session.value.selection
+                    val updated = NativeEditing.withFontSize(element, selection.min, selection.max, newSize)
+                    putText(element, updated)
+                    isModified = true
+                    textSession = session.copy(element = updated, template = updated, undoTaken = true)
+                }
+            }
+            /** What the size chip shows: the selection's own if it all agrees, else the default for text typed next. */
+            val textFontSize: Float = textSession?.let { session ->
+                val selection = session.value.selection
+                TextFormatting.sizeAt(session.element, selection.min, selection.max)
+            } ?: toolConfig.textSize
+            /** Rnote's font family box: on a selection directly, else the default going forward. */
+            val onTextFontFamilySelected: (String) -> Unit = { family ->
+                toolConfig = toolConfig.copy(textFamily = family)
+                val session = textSession
+                val element = session?.element
+                if (session != null && element != null && !session.value.selection.collapsed) {
+                    if (!session.undoTaken) {
+                        pushUndo()
+                        redoStack.clear()
+                    }
+                    val selection = session.value.selection
+                    val updated = NativeEditing.withFontFamily(element, selection.min, selection.max, family)
+                    putText(element, updated)
+                    isModified = true
+                    textSession = session.copy(element = updated, template = updated, undoTaken = true)
+                }
+            }
+            /** What the font button shows: the selection's own if it all agrees, else the default for text typed next. */
+            val textFamily: String = textSession?.let { session ->
+                val selection = session.value.selection
+                TextFormatting.familyAt(session.element, selection.min, selection.max)
+            } ?: toolConfig.textFamily
+
+            /**
+             * The box's top-left handle dragged: moves the box being typed into, whether it
+             * has an element yet or is still just the tap position waiting for a first
+             * character.
+             */
+            val onMoveTextBox: (Float, Float) -> Unit = { dx, dy ->
+                val session = textSession
+                if (session != null) {
+                    val element = session.element
+                    if (element != null) {
+                        if (!session.undoTaken) {
+                            pushUndo()
+                            redoStack.clear()
+                        }
+                        val moved = NativeEditing.translate(element, dx, dy) as NativeTextElement
+                        putText(element, moved)
+                        isModified = true
+                        textSession = session.copy(x = session.x + dx, y = session.y + dy, element = moved, template = moved, undoTaken = true)
+                    } else {
+                        textSession = session.copy(x = session.x + dx, y = session.y + dy)
+                    }
+                }
+            }
+            /**
+             * The box's right-edge handle dragged: the wrap width it reflows text at,
+             * grown or shrunk by [dx] — never its height, which always just follows from
+             * how the text then wraps. Applied to the element directly once there is one
+             * (session.widthOverride otherwise; see TextSession).
+             */
+            val onResizeTextBoxWidth: (Float) -> Unit = { dx ->
+                val session = textSession
+                if (session != null) {
+                    val element = session.element
+                    if (element != null) {
+                        val current = element.maxWidth ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
+                        val newWidth = (current + dx).coerceAtLeast(MIN_TEXT_BOX_WIDTH)
+                        if (!session.undoTaken) {
+                            pushUndo()
+                            redoStack.clear()
+                        }
+                        val updated = NativeEditing.withMaxWidth(element, newWidth)
+                        putText(element, updated)
+                        isModified = true
+                        textSession = session.copy(element = updated, template = updated, undoTaken = true)
+                    } else {
+                        val current = session.widthOverride ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
+                        textSession = session.copy(widthOverride = (current + dx).coerceAtLeast(MIN_TEXT_BOX_WIDTH))
+                    }
+                }
+            }
 
             // ── Share ─────────────────────────────────────────────────────────────
             val shareNote: (ShareTarget) -> Unit = { target ->
@@ -2886,10 +3004,10 @@ class MainActivity : ComponentActivity() {
                                     value = session.value,
                                     onValueChange = onTextChange,
                                     style = box?.let { TextBoxStyle.of(it) } ?: TextBoxStyle(
-                                        NativeEditing.TEXT_FONT_FAMILY, toolConfig.textSize, 500, false,
+                                        toolConfig.textFamily, toolConfig.textSize, 500, false,
                                         toolConfig.penColor.let { RnoteNativeColor(it.red, it.green, it.blue, it.alpha) },
                                         toolConfig.textAlignment.apiName,
-                                        NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
+                                        session.widthOverride ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
                                     ),
                                     runs = session.element?.let { TextFormatting.runs(it) } ?: emptyList(),
                                     topLeft = Offset(session.x, session.y),
@@ -2900,7 +3018,9 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onToggle = onToggleTextFormat,
                                     onDone = { textSession = null },
-                                    onCursorKey = { penSounds?.cursorKey() }
+                                    onCursorKey = { penSounds?.cursorKey() },
+                                    onMove = onMoveTextBox,
+                                    onResizeWidth = onResizeTextBoxWidth
                                 )
                             }
                         }
@@ -3214,6 +3334,11 @@ class MainActivity : ComponentActivity() {
                             onToggleTextFormat = onToggleTextFormat,
                             textAlignment = textAlignment,
                             onTextAlignmentSelected = onTextAlignmentSelected,
+                            textFontSize = textFontSize,
+                            onTextFontSizeChanged = onTextFontSizeChanged,
+                            textFamily = textFamily,
+                            onTextFontFamilySelected = onTextFontFamilySelected,
+                            customFonts = customFonts,
                             onPressureCurveSelected = { curve -> toolConfig = toolConfig.copy(pressureCurve = curve) },
                             onShapeLineChanged = { line -> toolConfig = toolConfig.copy(shapeLine = line) },
                             onShaperStyleSelected = { style -> toolConfig = toolConfig.copy(shaperStyle = style) },

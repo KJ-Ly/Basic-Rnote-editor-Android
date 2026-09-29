@@ -1,9 +1,15 @@
 package io.github.kjly.brna.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -28,6 +34,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
@@ -54,6 +61,7 @@ import io.github.kjly.brna.model.TextToggle
 import io.github.kjly.brna.model.ViewportState
 import io.github.kjly.brna.render.NativeElementRenderer
 import io.github.kjly.brna.storage.CustomFonts
+import io.github.kjly.brna.ui.theme.BrnaColors
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -108,7 +116,11 @@ fun InlineTextEditor(
     onToggle: (TextToggle) -> Unit,
     onDone: () -> Unit,
     /** A key on a keyboard that only moves the cursor: Rnote's typewriter thumps for it. */
-    onCursorKey: () -> Unit = {}
+    onCursorKey: () -> Unit = {},
+    /** The top-left handle dragged: the box moved by this many document units. */
+    onMove: (dx: Float, dy: Float) -> Unit = { _, _ -> },
+    /** The right-edge handle dragged: the wrap width grown (positive) or shrunk by this many document units. */
+    onResizeWidth: (dx: Float) -> Unit = {}
 ) {
     val density = LocalDensity.current
     val pxPerUnit = viewportState.effectiveScale * style.scale
@@ -149,45 +161,78 @@ fun InlineTextEditor(
     }
 
     val outline = Color(0x993584E4)
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        textStyle = textStyle,
-        cursorBrush = SolidColor(color.copy(alpha = 1f)),
-        visualTransformation = transformation,
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-        onTextLayout = { layout = it },
-        modifier = Modifier
-            .offset { IntOffset(screen.x.roundToInt(), screen.y.roundToInt()) }
-            .then(
-                if (style.maxWidth != null && style.maxWidth > 0f) {
-                    Modifier.width(with(density) { (style.maxWidth * pxPerUnit).toDp() })
-                } else {
-                    // No wrap width: as wide as the longest line, even past the screen's edge.
-                    Modifier.wrapContentWidth(Alignment.Start, unbounded = true).widthIn(min = 2.dp)
-                }
-            )
-            // Rnote outlines the text box being typed into.
-            .drawBehind {
-                drawRect(
-                    color = outline,
-                    style = Stroke(
-                        width = 1.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))
-                    )
+    // Wraps the field so the handles below can sit pinned to its top-left and right-edge,
+    // wherever the field ends up sized once its text is laid out.
+    Box(modifier = Modifier.offset { IntOffset(screen.x.roundToInt(), screen.y.roundToInt()) }) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = textStyle,
+            cursorBrush = SolidColor(color.copy(alpha = 1f)),
+            visualTransformation = transformation,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            onTextLayout = { layout = it },
+            modifier = Modifier
+                .then(
+                    if (style.maxWidth != null && style.maxWidth > 0f) {
+                        Modifier.width(with(density) { (style.maxWidth * pxPerUnit).toDp() })
+                    } else {
+                        // No wrap width: as wide as the longest line, even past the screen's edge.
+                        Modifier.wrapContentWidth(Alignment.Start, unbounded = true).widthIn(min = 2.dp)
+                    }
                 )
-            }
-            .focusRequester(focusRequester)
-            .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when {
-                    event.key == Key.Escape -> { onDone(); true }
-                    // Rnote's shortcuts: win.text-bold / -italic / -underline.
-                    event.isCtrlPressed && event.key == Key.B -> { onToggle(TextToggle.BOLD); true }
-                    event.isCtrlPressed && event.key == Key.I -> { onToggle(TextToggle.ITALIC); true }
-                    event.isCtrlPressed && event.key == Key.U -> { onToggle(TextToggle.UNDERLINE); true }
-                    event.key in CURSOR_KEYS -> { onCursorKey(); false }
-                    else -> false
+                // Rnote outlines the text box being typed into.
+                .drawBehind {
+                    drawRect(
+                        color = outline,
+                        style = Stroke(
+                            width = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))
+                        )
+                    )
+                }
+                .focusRequester(focusRequester)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when {
+                        event.key == Key.Escape -> { onDone(); true }
+                        // Rnote's shortcuts: win.text-bold / -italic / -underline.
+                        event.isCtrlPressed && event.key == Key.B -> { onToggle(TextToggle.BOLD); true }
+                        event.isCtrlPressed && event.key == Key.I -> { onToggle(TextToggle.ITALIC); true }
+                        event.isCtrlPressed && event.key == Key.U -> { onToggle(TextToggle.UNDERLINE); true }
+                        event.key in CURSOR_KEYS -> { onCursorKey(); false }
+                        else -> false
+                    }
+                }
+        )
+        // Top-left: drags the box around the canvas. Sits half outside the outline so it
+        // doesn't sit over the text itself and steal taps meant for placing the cursor.
+        TextBoxHandle(
+            modifier = Modifier.align(Alignment.TopStart).offset((-11).dp, (-11).dp),
+            onDrag = { dxPx, dyPx -> onMove(dxPx / pxPerUnit, dyPx / pxPerUnit) }
+        )
+        // Right edge, vertically centered on however tall the wrapped text ends up: drags
+        // the wrap width narrower or wider. Only the width is ever set this way — the
+        // height always follows from how the text then reflows, the same as Rnote's own.
+        TextBoxHandle(
+            modifier = Modifier.align(Alignment.CenterEnd).offset(11.dp, 0.dp),
+            onDrag = { dxPx, _ -> onResizeWidth(dxPx / pxPerUnit) }
+        )
+    }
+}
+
+/** A small round drag handle for [InlineTextEditor]'s move and resize-width affordances. */
+@Composable
+private fun TextBoxHandle(modifier: Modifier, onDrag: (Float, Float) -> Unit) {
+    Box(
+        modifier = modifier
+            .size(18.dp)
+            .background(Color.White, CircleShape)
+            .border(2.dp, BrnaColors.Accent, CircleShape)
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDrag(dragAmount.x, dragAmount.y)
                 }
             }
     )

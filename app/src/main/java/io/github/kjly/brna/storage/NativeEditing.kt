@@ -783,11 +783,13 @@ object NativeEditing {
         color: RnoteNativeColor,
         maxWidth: Float?,
         /** Rnote's `TextAlignment` name: "start", "center", "end" or "fill". */
-        alignment: String = "start"
+        alignment: String = "start",
+        /** A family loaded through CustomFonts, or Rnote's own default ([TEXT_FONT_FAMILY]). */
+        family: String = TEXT_FONT_FAMILY
     ): NativeTextElement? {
         if (text.isBlank()) return null
         val style = JsonObject().apply {
-            addProperty("font_family", TEXT_FONT_FAMILY)
+            addProperty("font_family", family)
             addProperty("font_size", round3(fontSize.toDouble()))
             addProperty("font_weight", 500)
             addProperty("font_style", "regular")
@@ -815,6 +817,19 @@ object NativeEditing {
             ?: return el.copy(alignment = alignment)
         style.addProperty("alignment", alignment)
         return parseText(obj) ?: el.copy(alignment = alignment)
+    }
+
+    /**
+     * [el] resized to wrap at [maxWidth] — Rnote's typewriter box dragged narrower or wider
+     * from its right edge — or to grow as wide as its longest line with no wrap at all when
+     * [maxWidth] is null. Everything else — text, ranges, position, style — kept as it was.
+     */
+    fun withMaxWidth(el: NativeTextElement, maxWidth: Float?): NativeTextElement {
+        val obj = el.raw?.takeIf { it.isJsonObject }?.deepCopy()?.asJsonObject ?: textJson(el)
+        val style = obj.get("text_style")?.takeIf { it.isJsonObject }?.asJsonObject
+            ?: return el.copy(maxWidth = maxWidth)
+        if (maxWidth != null) style.addProperty("max_width", round3(maxWidth.toDouble())) else style.add("max_width", JsonNull.INSTANCE)
+        return parseText(obj) ?: el.copy(maxWidth = maxWidth)
     }
 
     /**
@@ -847,7 +862,7 @@ object NativeEditing {
      * An empty selection changes nothing, as in Rnote.
      */
     fun toggleFormat(el: NativeTextElement, startChar: Int, endChar: Int, toggle: TextToggle): NativeTextElement =
-        editRanges(el, startChar, endChar, toggle) { intersecting ->
+        editRanges(el, startChar, endChar, toggle.key) { intersecting ->
             val smallest = intersecting.minByOrNull { rangeEnd(it) - rangeStart(it) }
                 ?: return@editRanges onValue(toggle)
             val value = smallest.asJsonObject.getAsJsonObject("attribute").get(toggle.key)
@@ -868,7 +883,23 @@ object NativeEditing {
      * kind to switch off.
      */
     fun setFormat(el: NativeTextElement, startChar: Int, endChar: Int, toggle: TextToggle, on: Boolean): NativeTextElement =
-        editRanges(el, startChar, endChar, toggle) { if (on) onValue(toggle) else null }
+        editRanges(el, startChar, endChar, toggle.key) { if (on) onValue(toggle) else null }
+
+    /**
+     * [size] set for the chars [startChar, endChar) of [el] — a ranged `font_size`
+     * attribute, the way desktop Rnote's font size box does on a selection. Whatever
+     * ranged size already covered any part of the selection is replaced.
+     */
+    fun withFontSize(el: NativeTextElement, startChar: Int, endChar: Int, size: Float): NativeTextElement =
+        editRanges(el, startChar, endChar, "font_size") { JsonPrimitive(round3(size.toDouble())) }
+
+    /**
+     * [family] set for the chars [startChar, endChar) of [el] — a ranged `font_family`
+     * attribute, the way desktop Rnote's font combo box does on a selection. Whatever
+     * ranged family already covered any part of the selection is replaced.
+     */
+    fun withFontFamily(el: NativeTextElement, startChar: Int, endChar: Int, family: String): NativeTextElement =
+        editRanges(el, startChar, endChar, "font_family") { JsonPrimitive(family) }
 
     /** The value Rnote's typewriter buttons set. */
     private fun onValue(toggle: TextToggle): JsonElement = when (toggle) {
@@ -878,16 +909,17 @@ object NativeEditing {
     }
 
     /**
-     * The shared part of [toggleFormat] and [setFormat]: the ranges of [toggle]'s kind that
-     * meet the selection are cut back to outside it (split around it if they reach past
-     * both ends), then [newValue] — given those ranges as they were — goes over the whole
-     * selection, or nothing does when it returns null.
+     * The shared part of [toggleFormat], [setFormat], [withFontSize] and [withFontFamily]:
+     * the ranges already carrying an attribute under [key] that meet the selection are cut
+     * back to outside it (split around it if they reach past both ends), then [newValue] —
+     * given those ranges as they were — goes over the whole selection, or nothing does when
+     * it returns null.
      */
     private inline fun editRanges(
         el: NativeTextElement,
         startChar: Int,
         endChar: Int,
-        toggle: TextToggle,
+        key: String,
         newValue: (intersecting: List<JsonElement>) -> JsonElement?
     ): NativeTextElement {
         val s = TextFormatting.byteIndex(el.text, minOf(startChar, endChar))
@@ -901,7 +933,7 @@ object NativeEditing {
         val others = JsonArray()
         val matching = mutableListOf<JsonElement>()
         for (item in existing) {
-            if (isRange(item) && attributeKey(item) == toggle.key) matching += item else others.add(item)
+            if (isRange(item) && attributeKey(item) == key) matching += item else others.add(item)
         }
         val intersecting = matching.filter { rangeEnd(it) > s && rangeStart(it) < e }
         val retained = matching.filter { !(rangeEnd(it) > s && rangeStart(it) < e) }
@@ -919,7 +951,7 @@ object NativeEditing {
         if (value != null) {
             result.add(JsonObject().apply {
                 add("range", JsonObject().apply { addProperty("start", s); addProperty("end", e) })
-                add("attribute", JsonObject().apply { add(toggle.key, value) })
+                add("attribute", JsonObject().apply { add(key, value) })
             })
         }
         style.add("ranged_text_attributes", mergeTouching(result))
