@@ -63,9 +63,14 @@ object FolderBrowser {
         null
     }
 
-    /** [uri] renamed to [newName]; the uri it has now (a provider may hand out a new one), or null on failure. */
+    /**
+     * [uri] renamed to [newName]; the uri it has now (a provider may hand out a new one),
+     * or null on failure. That null is the framework's word for a rename that did not
+     * happen — a name taken, a provider that refuses — and a provider that keeps the
+     * document's id gets the same uri back from it, so it is not made into one here.
+     */
     fun rename(context: Context, uri: Uri, newName: String): Uri? = try {
-        DocumentsContract.renameDocument(context.contentResolver, uri, newName) ?: uri
+        DocumentsContract.renameDocument(context.contentResolver, uri, newName)
     } catch (e: Exception) {
         e.printStackTrace()
         null
