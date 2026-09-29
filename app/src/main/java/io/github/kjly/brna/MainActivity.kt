@@ -63,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -146,6 +147,7 @@ import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -3561,17 +3563,36 @@ class MainActivity : ComponentActivity() {
         // "Open with" — only for the launch that brought the file, not when the activity
         // is recreated with the same intent after the process was reclaimed.
         if (savedInstanceState == null) {
-            if (intent?.action == Intent.ACTION_VIEW) handleViewIntent(intent) else offerRecovery()
+            val opening = intent?.action == Intent.ACTION_VIEW
+            if (opening) handleViewIntent(intent)
+            offerRecovery(afterOpening = opening)
             sweepBackups()
         }
     }
 
-    /** Looks for notes the last session didn't get to save, and offers them back. */
-    private fun offerRecovery() {
+    /**
+     * Looks for notes the last session didn't get to save, and offers them back. When the
+     * launch is "Open with", the file it brought is opened first, and what is offered
+     * comes after it: a recovered note may only go into a tab of its own, so one of that
+     * very file is not offered here — a second copy would save over the first — but left
+     * for the next start from the launcher, as it was before this was offered at all.
+     */
+    private fun offerRecovery(afterOpening: Boolean = false) {
         lifecycleScope.launch {
-            pendingRecovery = withContext(Dispatchers.IO) { Recovery.readAll(this@MainActivity) }
+            val found = withContext(Dispatchers.IO) { Recovery.readAll(this@MainActivity) }
+            if (afterOpening) {
+                snapshotFlow { busyMessage }.first { it == null }
+                pendingRecovery = found.filter { r -> !isOpenInATab(r.uri) }
+            } else {
+                pendingRecovery = found
+            }
         }
     }
+
+    /** Whether [uri]'s file is the one in a tab, the one on screen or another. */
+    private fun isOpenInATab(uri: Uri?): Boolean =
+        FolderBrowser.sameDocument(uri, currentDocumentUri) ||
+            parkedTabs.values.any { FolderBrowser.sameDocument(uri, it.uri) }
 
     /** Lets go of kept versions past their week (see [Backups]). */
     private fun sweepBackups() {
