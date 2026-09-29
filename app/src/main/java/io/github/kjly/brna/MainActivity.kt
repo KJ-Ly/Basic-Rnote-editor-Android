@@ -1466,7 +1466,9 @@ class MainActivity : ComponentActivity() {
                         allowFingerDrawing = SettingsManager.loadAllowFingerDrawing(this),
                         snapPositions = SettingsManager.loadSnapPositions(this),
                         blockPinchZoom = SettingsManager.loadBlockPinchZoom(this),
-                        respectBorders = SettingsManager.loadRespectBorders(this)
+                        respectBorders = SettingsManager.loadRespectBorders(this),
+                        spaceLimitVerticalBorders = SettingsManager.loadSpaceLimitVertical(this),
+                        spaceLimitHorizontalBorders = SettingsManager.loadSpaceLimitHorizontal(this)
                     )
                 )
             }
@@ -1504,6 +1506,17 @@ class MainActivity : ComponentActivity() {
             val toggleRespectBorders: () -> Unit = {
                 toolConfig = toolConfig.copy(respectBorders = !toolConfig.respectBorders)
                 SettingsManager.saveRespectBorders(this@MainActivity, toolConfig.respectBorders)
+            }
+            // The Vertical Space tool's two limits, on the Tools page of the pen strip.
+            val toggleSpaceLimit: (vertical: Boolean) -> Unit = { vertical ->
+                toolConfig = if (vertical) {
+                    toolConfig.copy(spaceLimitVerticalBorders = !toolConfig.spaceLimitVerticalBorders)
+                } else {
+                    toolConfig.copy(spaceLimitHorizontalBorders = !toolConfig.spaceLimitHorizontalBorders)
+                }
+                SettingsManager.saveSpaceLimits(
+                    this@MainActivity, toolConfig.spaceLimitVerticalBorders, toolConfig.spaceLimitHorizontalBorders
+                )
             }
             /** Rnote's canvas menu toggle, and Ctrl+Shift+P. */
             val toggleSnapPositions: () -> Unit = {
@@ -3089,6 +3102,7 @@ class MainActivity : ComponentActivity() {
                             },
                             onSelectorModeSelected = { mode -> toolConfig = toolConfig.copy(selectorMode = mode) },
                             onToolsModeSelected = { mode -> toolConfig = toolConfig.copy(toolsMode = mode) },
+                            onSpaceLimitToggled = toggleSpaceLimit,
                             onSnapAnglesToggled = {
                                 toolConfig = toolConfig.copy(snapAngles = !toolConfig.snapAngles)
                             },

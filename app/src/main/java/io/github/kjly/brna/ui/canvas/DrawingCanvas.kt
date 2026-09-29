@@ -656,10 +656,15 @@ fun DrawingCanvas(
                         if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.VERTICAL_SPACE) {
                             // What moves is settled here, as in Rnote: dragging back up past
                             // the line must not start picking up what was above it.
+                            // Within the page the pen went down on, if Rnote's limits say so.
+                            val area = VerticalSpace.region(
+                                x, y, paperStyle.effectivePageWidthPx, paperStyle.effectivePageHeightPx,
+                                toolConfig.spaceLimitVerticalBorders, toolConfig.spaceLimitHorizontalBorders
+                            )
                             spaceDrag = SpaceDrag(
                                 y,
-                                VerticalSpace.strokesBelow(strokes, y),
-                                VerticalSpace.nativesBelow(nativeElements, y)
+                                VerticalSpace.strokesIn(strokes, area),
+                                VerticalSpace.nativesIn(nativeElements, area)
                             )
                             return@pointerInteropFilter true
                         }

@@ -66,8 +66,9 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   takes what another app copied, as Rnote's does: a picture, a PDF (through the import
   dialog), a Xournal++ file, or text as a new text box; and the same can be dragged
   onto the note from another app in split screen, landing where it is let go.
-- **Tools**: Rnote's Vertical Space — drag down to open up room, up to close it —
-  Offset Camera (drag the page with the pen), Zoom (drag up to zoom in, down to zoom
+- **Tools**: Rnote's Vertical Space — drag down to open up room, up to close it, and
+  with Rnote's two limits, to the page column the pen went down in and down to the next
+  page border only — Offset Camera (drag the page with the pen), Zoom (drag up to zoom in, down to zoom
   out, about where the drag began) and its Laser, a red trail to point with that
   fades away and is never saved.
 - **Stylus-aware input**: stylus-only mode by default (finger pans and zooms),

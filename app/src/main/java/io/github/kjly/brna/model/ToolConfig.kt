@@ -145,6 +145,17 @@ data class ToolConfig(
     val selectorMode: SelectorMode = SelectorMode.POLYGON,
     val toolsMode: ToolsMode = ToolsMode.VERTICAL_SPACE,
     /**
+     * Rnote's "Limit movement to Vertical Page Borders" for the Vertical Space tool
+     * (`VerticalSpaceToolConfig`): only what is in the page column the pen went down in
+     * moves, not what lies left or right of it. Off by default, as in Rnote; kept in the settings.
+     */
+    val spaceLimitVerticalBorders: Boolean = false,
+    /**
+     * Rnote's "Limit movement to Horizontal Page Borders": only what lies between the pen
+     * and the next page border below it moves. Off by default, as in Rnote; kept in the settings.
+     */
+    val spaceLimitHorizontalBorders: Boolean = false,
+    /**
      * The colour picker's second pad: what new shapes are filled with. Transparent — no
      * fill — until one is picked, as in Rnote, whose pens start without a fill colour.
      */

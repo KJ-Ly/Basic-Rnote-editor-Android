@@ -43,6 +43,8 @@ import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.ViewAgenda
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Waves
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -131,6 +133,8 @@ fun PenConfigStrip(
     onLockAspectRatioToggled: () -> Unit = {},
     onSelectorModeSelected: (SelectorMode) -> Unit = {},
     onToolsModeSelected: (ToolsMode) -> Unit = {},
+    /** One of the Vertical Space tool's two limits switched: true for the vertical page borders, false for the horizontal. */
+    onSpaceLimitToggled: (vertical: Boolean) -> Unit = {},
     onSnapAnglesToggled: () -> Unit = {},
     /** The Shaper's constraints changed: switched on or off, or a ratio added or taken away. */
     onShapeConstraintsChanged: (ShapeConstraints) -> Unit = {},
@@ -195,7 +199,7 @@ fun PenConfigStrip(
                     toolConfig, onSizeChanged, textFormats, textFormatsEnabled, onToggleTextFormat,
                     textAlignment, onTextAlignmentSelected
                 )
-                ToolType.TOOLS -> ToolsConfigPage(toolConfig.toolsMode, onToolsModeSelected)
+                ToolType.TOOLS -> ToolsConfigPage(toolConfig, onToolsModeSelected, onSpaceLimitToggled)
             }
         }
     }
@@ -987,7 +991,12 @@ private fun SelectorModeMenu(mode: SelectorMode, onModeSelected: (SelectorMode) 
  * the Laser.
  */
 @Composable
-private fun ToolsConfigPage(mode: ToolsMode, onModeSelected: (ToolsMode) -> Unit) {
+private fun ToolsConfigPage(
+    toolConfig: ToolConfig,
+    onModeSelected: (ToolsMode) -> Unit,
+    onSpaceLimitToggled: (vertical: Boolean) -> Unit
+) {
+    val mode = toolConfig.toolsMode
     StripIconToggle(Icons.Default.Height, "Vertical Space", selected = mode == ToolsMode.VERTICAL_SPACE, implemented = true) {
         onModeSelected(ToolsMode.VERTICAL_SPACE)
     }
@@ -1013,6 +1022,32 @@ private fun ToolsConfigPage(mode: ToolsMode, onModeSelected: (ToolsMode) -> Unit
         lineHeight = 12.sp,
         textAlign = TextAlign.Center,
         modifier = Modifier.padding(vertical = 4.dp)
+    )
+    if (mode == ToolsMode.VERTICAL_SPACE) {
+        // Rnote's two limits: which of the pages the pen goes down on move with it.
+        StripDivider()
+        StripIconToggle(
+            Icons.Default.ViewColumn, "Limit movement to Vertical Page Borders",
+            selected = toolConfig.spaceLimitVerticalBorders, implemented = true
+        ) { onSpaceLimitToggled(true) }
+        SpaceLimitCaption("Only its\npage\ncolumn")
+        StripIconToggle(
+            Icons.Default.ViewAgenda, "Limit movement to Horizontal Page Borders",
+            selected = toolConfig.spaceLimitHorizontalBorders, implemented = true
+        ) { onSpaceLimitToggled(false) }
+        SpaceLimitCaption("Down to\nthe page\nborder")
+    }
+}
+
+@Composable
+private fun SpaceLimitCaption(text: String) {
+    Text(
+        text = text,
+        color = BrnaColors.TextSecondaryOnPanel,
+        fontSize = 10.sp,
+        lineHeight = 12.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(bottom = 4.dp)
     )
 }
 
