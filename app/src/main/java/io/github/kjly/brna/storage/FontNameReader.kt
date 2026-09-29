@@ -24,10 +24,12 @@ object FontNameReader {
     /** The Typographic Family Name (nameID 16) if the font has one, else the plain Family Name (1). */
     fun familyName(bytes: ByteArray): String? = try {
         val buf = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
-        val directoryOffset = if (bytes.size >= 12 && tag(buf, 0) == "ttcf") {
-            // Font collection: version(4) numFonts(4) offset[0](4) ... — the first font's own
-            // sfnt table directory; its own table offsets are absolute file offsets already.
-            u32(buf, 8)
+        val directoryOffset = if (bytes.size >= 16 && tag(buf, 0) == "ttcf") {
+            // Font collection: tag(4) majorVersion(2) minorVersion(2) numFonts(4) then the
+            // offset of each font's sfnt table directory, so the first font's is at byte 12.
+            // The table offsets inside it are absolute file offsets already.
+            if (u32(buf, 8) < 1) return null
+            u32(buf, 12)
         } else 0L
         val tables = tableDirectory(buf, directoryOffset) ?: return null
         val nameTableOffset = tables["name"] ?: return null
@@ -46,8 +48,9 @@ object FontNameReader {
     private fun u32(buf: ByteBuffer, offset: Int): Long = buf.getInt(offset).toLong() and 0xFFFFFFFFL
 
     private fun tableDirectory(buf: ByteBuffer, directoryOffset: Long): Map<String, Long>? {
+        // Compared as a Long: an offset past 2 GB must not wrap round into the file.
+        if (directoryOffset < 0 || directoryOffset + 12 > buf.capacity()) return null
         val base = directoryOffset.toInt()
-        if (directoryOffset < 0 || base + 12 > buf.capacity()) return null
         val numTables = u16(buf, base + 4)
         if (numTables !in 1..MAX_TABLES) return null
         val recordsEnd = base + 12 + numTables * 16
@@ -69,8 +72,8 @@ object FontNameReader {
     )
 
     private fun familyFromNameTable(buf: ByteBuffer, tableOffset: Long): String? {
+        if (tableOffset < 0 || tableOffset + 6 > buf.capacity()) return null
         val base = tableOffset.toInt()
-        if (tableOffset < 0 || base + 6 > buf.capacity()) return null
         val count = u16(buf, base + 2)
         val stringAreaOffset = base + u16(buf, base + 4)
         val recordsEnd = base + 6 + count * 12

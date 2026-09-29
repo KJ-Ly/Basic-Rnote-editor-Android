@@ -54,7 +54,10 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   an existing one. Bold, italic, underline and strikethrough — from the strip,
   or Ctrl+B / Ctrl+I / Ctrl+U on a keyboard — stored as Rnote stores them, so
   formatting made on either side shows on the other. Left, centred, right or
-  justified, as Rnote aligns text.
+  justified, as Rnote aligns text. A note's text in a font Android doesn't have
+  (Cantarell, say) can be drawn in it: "Fonts…" in the ⋮ menu loads a `.ttf`, `.otf` or
+  `.ttc` file under the family name the note asks for, read from the file itself. Only
+  how the text is drawn changes; the note's own font name is kept as it is.
 - **Eraser**: Trash Strokes and Split Strokes modes. Like Rnote's, it erases ink
   and shapes and leaves text and images alone.
 - **Selector**, for ink and for desktop text, shapes and images alike, in

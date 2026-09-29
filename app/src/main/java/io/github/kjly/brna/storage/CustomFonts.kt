@@ -107,20 +107,29 @@ object CustomFonts {
         cache.remove(key(entry.family))
     }
 
-    private fun extensionOf(name: String): String {
+    /**
+     * The extension of [name] as it was given (".ttf", ".otf", ".ttc"), or none. Only a short
+     * run of letters and digits counts: the copy is named after it, and a file name can hold
+     * anything a provider lets through, so it must not decide where the copy is written.
+     */
+    internal fun extensionOf(name: String): String {
         val dot = name.lastIndexOf('.')
-        return if (dot in 0 until name.length - 1) name.substring(dot) else ""
+        if (dot < 0) return ""
+        val extension = name.substring(dot)
+        return if (EXTENSION.matches(extension)) extension else ""
     }
+
+    private val EXTENSION = Regex("""\.[A-Za-z0-9]{1,5}""")
 
     // One line per entry, tab-separated; family/file names can't contain tabs or
     // newlines, so this is safe without a JSON dependency (matching PdfImportPrefs'
     // and PenShortcuts' own hand-rolled encoding elsewhere in this package).
-    private fun encode(entries: List<Entry>): String =
+    internal fun encode(entries: List<Entry>): String =
         entries.joinToString("\n") { "${sanitize(it.family)}\t${sanitize(it.fileName)}\t${sanitize(it.originalName)}" }
 
     private fun sanitize(s: String) = s.replace('\t', ' ').replace('\n', ' ')
 
-    private fun decode(text: String?): List<Entry> {
+    internal fun decode(text: String?): List<Entry> {
         if (text.isNullOrEmpty()) return emptyList()
         return text.split("\n").mapNotNull { line ->
             if (line.isBlank()) return@mapNotNull null

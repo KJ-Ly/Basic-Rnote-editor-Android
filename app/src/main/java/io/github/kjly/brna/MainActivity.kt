@@ -727,12 +727,19 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            pendingFontUri = it
-            val fileTitle = DocumentUri.titleFrom(DocumentUri.displayName(this, it) ?: it.lastPathSegment ?: "Font")
-            // Read the family straight out of the font file's own name table when we
-            // can; a name typed by hand only if that fails (an unsupported container,
-            // or a file that isn't really a font).
-            pendingFontSuggestedName = detectFontFamily(it) ?: fileTitle
+            // The file is read off the main thread: a font can be megabytes, and a provider
+            // like Drive may have to fetch it first.
+            lifecycleScope.launch {
+                val (family, fileTitle) = withContext(Dispatchers.IO) {
+                    detectFontFamily(it) to
+                        DocumentUri.titleFrom(DocumentUri.displayName(this@MainActivity, it) ?: it.lastPathSegment ?: "Font")
+                }
+                // Read the family straight out of the font file's own name table when we
+                // can; a name typed by hand only if that fails (an unsupported container,
+                // or a file that isn't really a font).
+                pendingFontSuggestedName = family ?: fileTitle
+                pendingFontUri = it
+            }
         }
     }
 
@@ -768,15 +775,21 @@ class MainActivity : ComponentActivity() {
     /** Registers the font just picked under [family], and refreshes what draws it. */
     private fun importFont(family: String) {
         val uri = pendingFontUri ?: return
-        val originalName = DocumentUri.displayName(this, uri) ?: pendingFontSuggestedName
-        val entry = CustomFonts.import(this, uri, family, originalName)
         pendingFontUri = null
-        if (entry == null) {
-            Toast.makeText(this, "Could not load that as a font", Toast.LENGTH_LONG).show()
-            return
+        lifecycleScope.launch {
+            // Copied and loaded off the main thread, like reading the name was.
+            val loaded = withContext(Dispatchers.IO) {
+                val originalName = DocumentUri.displayName(this@MainActivity, uri) ?: pendingFontSuggestedName
+                CustomFonts.import(this@MainActivity, uri, family, originalName)
+                    ?.let { CustomFonts.load(this@MainActivity) }
+            }
+            if (loaded == null) {
+                Toast.makeText(this@MainActivity, "Could not load that as a font", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            customFonts = loaded
+            customFontsVersion++
         }
-        customFonts = CustomFonts.load(this)
-        customFontsVersion++
     }
 
     private fun removeFont(entry: CustomFonts.Entry) {
@@ -3457,27 +3470,6 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    // ── Versions kept of the note's file ─────────────────────────
-                    if (showRestore) {
-                        val uri = currentDocumentUri
-                        var versions by remember { mutableStateOf<List<Backups.Version>?>(null) }
-                        LaunchedEffect(uri) {
-                            versions = if (uri == null) {
-                                emptyList()
-                            } else {
-                                withContext(Dispatchers.IO) { Backups.versions(this@MainActivity, uri) }
-                            }
-                        }
-                        RestoreVersionDialog(
-                            versions = versions,
-                            onRestore = { version ->
-                                showRestore = false
-                                restoreVersion(version)
-                            },
-                            onDismiss = { showRestore = false }
-                        )
-                    }
-
                     // ── Fonts: files loaded to stand in for a family Android doesn't have ──
                     if (showFontManager) {
                         // Families this note's text boxes ask for that nothing loaded covers —
@@ -3514,6 +3506,27 @@ class MainActivity : ComponentActivity() {
                             suggestedFamily = pendingFontSuggestedName,
                             onConfirm = { family -> importFont(family) },
                             onDismiss = { pendingFontUri = null }
+                        )
+                    }
+
+                    // ── Versions kept of the note's file ─────────────────────────
+                    if (showRestore) {
+                        val uri = currentDocumentUri
+                        var versions by remember { mutableStateOf<List<Backups.Version>?>(null) }
+                        LaunchedEffect(uri) {
+                            versions = if (uri == null) {
+                                emptyList()
+                            } else {
+                                withContext(Dispatchers.IO) { Backups.versions(this@MainActivity, uri) }
+                            }
+                        }
+                        RestoreVersionDialog(
+                            versions = versions,
+                            onRestore = { version ->
+                                showRestore = false
+                                restoreVersion(version)
+                            },
+                            onDismiss = { showRestore = false }
                         )
                     }
 
