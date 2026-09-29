@@ -2,6 +2,7 @@ package io.github.kjly.brna.render
 
 import io.github.kjly.brna.model.PressureCurve
 import io.github.kjly.brna.model.StrokePoint
+import io.github.kjly.brna.model.TexturedStyle
 import java.util.Locale
 
 /**
@@ -13,10 +14,12 @@ import java.util.Locale
 fun composeStrokePath(
     points: List<StrokePoint>,
     strokeWidth: Float,
-    curve: PressureCurve
+    curve: PressureCurve,
+    /** Set for a stroke in Rnote's Textured style: its dots, not an outline. */
+    textured: TexturedStyle? = null
 ): androidx.compose.ui.graphics.Path {
     val path = androidx.compose.ui.graphics.Path()
-    StrokeOutline.emit(points, strokeWidth, curve, object : StrokeOutline.Sink {
+    emitOutline(points, strokeWidth, curve, textured, object : StrokeOutline.Sink {
         override fun moveTo(x: Float, y: Float) = path.moveTo(x, y)
         override fun lineTo(x: Float, y: Float) = path.lineTo(x, y)
         override fun cubicTo(c1x: Float, c1y: Float, c2x: Float, c2y: Float, x: Float, y: Float) =
@@ -38,10 +41,12 @@ fun composeStrokePath(
 fun androidStrokePath(
     points: List<StrokePoint>,
     strokeWidth: Float,
-    curve: PressureCurve
+    curve: PressureCurve,
+    /** Set for a stroke in Rnote's Textured style: its dots, not an outline. */
+    textured: TexturedStyle? = null
 ): android.graphics.Path {
     val path = android.graphics.Path()
-    StrokeOutline.emit(points, strokeWidth, curve, object : StrokeOutline.Sink {
+    emitOutline(points, strokeWidth, curve, textured, object : StrokeOutline.Sink {
         override fun moveTo(x: Float, y: Float) = path.moveTo(x, y)
         override fun lineTo(x: Float, y: Float) = path.lineTo(x, y)
         override fun cubicTo(c1x: Float, c1y: Float, c2x: Float, c2y: Float, x: Float, y: Float) =
@@ -57,11 +62,13 @@ fun androidStrokePath(
 fun svgStrokePathData(
     points: List<StrokePoint>,
     strokeWidth: Float,
-    curve: PressureCurve
+    curve: PressureCurve,
+    /** Set for a stroke in Rnote's Textured style: its dots, not an outline. */
+    textured: TexturedStyle? = null
 ): String {
     val sb = StringBuilder()
     fun n(v: Float) = String.format(Locale.ROOT, "%.3f", v)
-    StrokeOutline.emit(points, strokeWidth, curve, object : StrokeOutline.Sink {
+    emitOutline(points, strokeWidth, curve, textured, object : StrokeOutline.Sink {
         override fun moveTo(x: Float, y: Float) { sb.append("M${n(x)},${n(y)} ") }
         override fun lineTo(x: Float, y: Float) { sb.append("L${n(x)},${n(y)} ") }
         override fun cubicTo(c1x: Float, c1y: Float, c2x: Float, c2y: Float, x: Float, y: Float) {
@@ -76,4 +83,19 @@ fun svgStrokePathData(
         }
     })
     return sb.toString().trim()
+}
+
+/** The stroke's filled geometry: Rnote's textured dots when it has them, else its outline. */
+private fun emitOutline(
+    points: List<StrokePoint>,
+    strokeWidth: Float,
+    curve: PressureCurve,
+    textured: TexturedStyle?,
+    sink: StrokeOutline.Sink
+) {
+    if (textured != null) {
+        TexturedDots.emit(points, strokeWidth, curve, textured, sink)
+    } else {
+        StrokeOutline.emit(points, strokeWidth, curve, sink)
+    }
 }

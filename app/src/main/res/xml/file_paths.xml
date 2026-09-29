@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Where the camera app writes a photo taken for a note (see MainActivity.takePhoto). -->
+    <cache-path name="camera" path="camera/" />
+    <!-- Files handed to other apps by the Share button (see MainActivity.shareExport). -->
+    <cache-path name="share" path="share/" />
+    <!-- A picture of the selection put on the clipboard by Copy (see MainActivity.copySelectionImage). -->
+    <cache-path name="clipboard" path="clipboard/" />
+</paths>

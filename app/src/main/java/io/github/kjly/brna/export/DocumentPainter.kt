@@ -2,7 +2,9 @@ package io.github.kjly.brna.export
 
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.render.NativeElementRenderer
 import io.github.kjly.brna.model.Stroke
 
 /**
@@ -25,7 +27,9 @@ object DocumentPainter {
         strokes: List<Stroke>,
         region: Rect,
         prefs: ExportPrefs,
-        pages: List<Rect> = emptyList()
+        pages: List<Rect> = emptyList(),
+        /** Desktop elements to include; brush strokes in here are skipped ([strokes] has them). */
+        nativeElements: List<NativeCanvasElement> = emptyList()
     ) {
         val paperColor =
             if (prefs.optimizePrinterOutput) Color.White else paperStyle.currentBackgroundColor
@@ -57,8 +61,15 @@ object DocumentPainter {
 
         // Clipped to the region so a stroke crossing a page boundary is cut at the edge
         // rather than spilling into the neighbouring page's file.
+        // Layered as Rnote layers them: PDF pages and images, then ink, then text and shapes.
+        val visible = nativeElements.filter { el ->
+            el.maxX >= region.left && el.minX <= region.right &&
+                el.maxY >= region.top && el.minY <= region.bottom
+        }
         canvas.clipped(region) {
+            for (el in visible) if (NativeElementRenderer.isUnderlay(el)) canvas.drawNative(el)
             for (stroke in strokes) canvas.fillStroke(stroke)
+            for (el in visible) if (NativeElementRenderer.isOverlay(el)) canvas.drawNative(el)
         }
     }
 

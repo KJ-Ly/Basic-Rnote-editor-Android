@@ -60,8 +60,12 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
+    // Where the pen is heading, so the ink drawn under it keeps up (DrawingCanvas).
+    implementation(libs.androidx.input.motionprediction)
 
     implementation("com.google.code.gson:gson:2.10.1")
+    // Renders the SVG of PDF pages imported in desktop Rnote (vectorimage strokes).
+    implementation("com.caverock:androidsvg-aar:1.4")
 
     debugImplementation(libs.androidx.ui.tooling)
 

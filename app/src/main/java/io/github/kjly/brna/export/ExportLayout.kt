@@ -2,6 +2,9 @@ package io.github.kjly.brna.export
 
 import androidx.compose.ui.geometry.Rect
 import io.github.kjly.brna.model.LayoutMode
+import io.github.kjly.brna.model.NativeBrushStroke
+import io.github.kjly.brna.model.NativeCanvasElement
+import io.github.kjly.brna.model.NativeVectorImageElement
 import io.github.kjly.brna.model.PaperStyle
 import io.github.kjly.brna.model.Stroke
 import kotlin.math.floor
@@ -36,7 +39,11 @@ object ExportLayout {
      * The bounding box of [strokes], widened by each stroke's nominal half-width so the
      * outline isn't clipped at the edge. Null when there is nothing to bound.
      */
-    fun contentBounds(strokes: List<Stroke>): Rect? {
+    fun contentBounds(
+        strokes: List<Stroke>,
+        /** Desktop elements (PDF pages, images, text, shapes) that count as content too. */
+        nativeElements: List<NativeCanvasElement> = emptyList()
+    ): Rect? {
         var minX = Float.POSITIVE_INFINITY
         var minY = Float.POSITIVE_INFINITY
         var maxX = Float.NEGATIVE_INFINITY
@@ -53,6 +60,15 @@ object ExportLayout {
                 if (p.y + half > maxY) maxY = p.y + half
             }
         }
+        for (el in nativeElements) {
+            // Brush strokes are already in [strokes], edited or erased since they were read.
+            if (el is NativeBrushStroke) continue
+            seen = true
+            if (el.minX < minX) minX = el.minX
+            if (el.minY < minY) minY = el.minY
+            if (el.maxX > maxX) maxX = el.maxX
+            if (el.maxY > maxY) maxY = el.maxY
+        }
         return if (seen) Rect(minX, minY, maxX, maxY) else null
     }
 
@@ -66,13 +82,19 @@ object ExportLayout {
     fun pageRects(
         paperStyle: PaperStyle,
         strokes: List<Stroke>,
-        order: SplitOrder = SplitOrder.ROW_MAJOR
+        order: SplitOrder = SplitOrder.ROW_MAJOR,
+        nativeElements: List<NativeCanvasElement> = emptyList(),
+        /** Cut along imported PDF pages instead of the format grid; see [importedPageRects]. */
+        followImportedPages: Boolean = false
     ): List<Rect> {
+        if (followImportedPages) {
+            importedPageRects(strokes, nativeElements, order)?.let { return it }
+        }
         if (!hasPages(paperStyle)) return emptyList()
 
         val pageW = paperStyle.effectivePageWidthPx
         val pageH = paperStyle.effectivePageHeightPx
-        val content = contentBounds(strokes)
+        val content = contentBounds(strokes, nativeElements)
 
         var firstCol = 0; var lastCol = 0
         var firstRow = 0; var lastRow = 0
@@ -86,9 +108,12 @@ object ExportLayout {
         val cols: List<Int>
         val rows: List<Int>
         when (paperStyle.layoutMode) {
-            LayoutMode.FIXED_SIZE -> { cols = listOf(0); rows = listOf(0) }
+            // Its pages, however many it has and whatever lies outside them, as Rnote exports it.
+            LayoutMode.FIXED_SIZE -> { cols = listOf(0); rows = (0 until paperStyle.fixedPages).toList() }
             LayoutMode.CONTINUOUS_VERTICAL -> { cols = listOf(0); rows = (firstRow..lastRow).toList() }
-            LayoutMode.INFINITE -> { cols = (firstCol..lastCol).toList(); rows = (firstRow..lastRow).toList() }
+            // Semi Infinite keeps the origin-inclusive span too: ink drawn left of or above
+            // the origin is still in the file, so its pages are still exported.
+            LayoutMode.SEMI_INFINITE, LayoutMode.INFINITE -> { cols = (firstCol..lastCol).toList(); rows = (firstRow..lastRow).toList() }
         }
 
         val cells = if (order.isRowMajor) {
@@ -103,12 +128,83 @@ object ExportLayout {
         }
     }
 
+    /** Room left around ink that widens an imported page, so it isn't cut at the edge. */
+    private const val IMPORTED_PAGE_MARGIN_PX = 24f
+
+    /**
+     * One page per imported PDF page, or null when the document has none.
+     *
+     * A PDF imported larger than the document format straddles several format pages, so
+     * cutting along the format grid slices every worksheet into pieces. Here each imported
+     * page is a page of its own, widened to take in the notes written beside it: anything
+     * whose vertical centre lies level with the page belongs to it, and anything level with
+     * no page goes to the nearest one.
+     */
+    fun importedPageRects(
+        strokes: List<Stroke>,
+        nativeElements: List<NativeCanvasElement>,
+        order: SplitOrder = SplitOrder.ROW_MAJOR
+    ): List<Rect>? {
+        val imported = nativeElements.filterIsInstance<NativeVectorImageElement>()
+        if (imported.isEmpty()) return null
+
+        // Reading order: top to bottom, then left to right.
+        val bases = imported
+            .map { Rect(it.minX, it.minY, it.maxX, it.maxY) }
+            .sortedWith(compareBy<Rect>({ it.top }, { it.left }))
+        val lefts = bases.map { it.left }.toFloatArray()
+        val tops = bases.map { it.top }.toFloatArray()
+        val rights = bases.map { it.right }.toFloatArray()
+        val bottoms = bases.map { it.bottom }.toFloatArray()
+
+        fun include(minX: Float, minY: Float, maxX: Float, maxY: Float) {
+            val cy = (minY + maxY) / 2f
+            var best = -1
+            var bestDistance = Float.MAX_VALUE
+            for (i in bases.indices) {
+                val b = bases[i]
+                val distance = when {
+                    cy < b.top -> b.top - cy
+                    cy > b.bottom -> cy - b.bottom
+                    else -> 0f
+                }
+                if (distance < bestDistance) { bestDistance = distance; best = i }
+            }
+            if (best < 0) return
+            val m = IMPORTED_PAGE_MARGIN_PX
+            if (minX - m < lefts[best]) lefts[best] = minX - m
+            if (minY - m < tops[best]) tops[best] = minY - m
+            if (maxX + m > rights[best]) rights[best] = maxX + m
+            if (maxY + m > bottoms[best]) bottoms[best] = maxY + m
+        }
+
+        for (stroke in strokes) {
+            if (stroke.points.isEmpty()) continue
+            val half = stroke.strokeWidth / 2f
+            include(
+                stroke.points.minOf { it.x } - half, stroke.points.minOf { it.y } - half,
+                stroke.points.maxOf { it.x } + half, stroke.points.maxOf { it.y } + half
+            )
+        }
+        for (el in nativeElements) {
+            if (el is NativeBrushStroke || el is NativeVectorImageElement) continue
+            include(el.minX, el.minY, el.maxX, el.maxY)
+        }
+
+        val pages = bases.indices.map { Rect(lefts[it], tops[it], rights[it], bottoms[it]) }
+        return if (order.isReversed) pages.reversed() else pages
+    }
+
     /**
      * The region a whole-document export covers: the union of its pages, or — with no
      * page grid — the content plus a margin.
      */
-    fun documentBounds(paperStyle: PaperStyle, strokes: List<Stroke>): Rect {
-        val pages = pageRects(paperStyle, strokes)
+    fun documentBounds(
+        paperStyle: PaperStyle,
+        strokes: List<Stroke>,
+        nativeElements: List<NativeCanvasElement> = emptyList()
+    ): Rect {
+        val pages = pageRects(paperStyle, strokes, nativeElements = nativeElements)
         if (pages.isNotEmpty()) {
             return pages.reduce { acc, r ->
                 Rect(
@@ -117,14 +213,39 @@ object ExportLayout {
                 )
             }
         }
-        val content = contentBounds(strokes)
+        val content = contentBounds(strokes, nativeElements)
             ?: return Rect(0f, 0f, EMPTY_DOC_SIDE_PX, EMPTY_DOC_SIDE_PX)
         return content.inflate(UNPAGED_MARGIN_PX)
     }
 
-    /** The region a selection export covers: its bounds plus Rnote's configurable margin. */
-    fun selectionBounds(selection: List<Stroke>, marginPx: Float): Rect? =
-        contentBounds(selection)?.inflate(marginPx.coerceAtLeast(0f))
+    /**
+     * The region a selection export covers: its bounds plus Rnote's configurable margin.
+     * [natives] are the selected desktop elements — text, shapes, images — which the
+     * selector holds alongside the ink.
+     */
+    fun selectionBounds(
+        selection: List<Stroke>,
+        marginPx: Float,
+        natives: List<NativeCanvasElement> = emptyList()
+    ): Rect? = contentBounds(selection, natives)?.inflate(marginPx.coerceAtLeast(0f))
+
+    /**
+     * Which of [pages] is "this page" for a [view] of the document: the one showing the
+     * most of itself. Null when none of them is in view at all.
+     */
+    fun pageInView(pages: List<Rect>, view: Rect): Int? {
+        var best: Int? = null
+        var bestArea = 0f
+        pages.forEachIndexed { i, page ->
+            val overlap = intersectOrNull(page, view) ?: return@forEachIndexed
+            val area = overlap.width * overlap.height
+            if (area > bestArea) {
+                best = i
+                bestArea = area
+            }
+        }
+        return best
+    }
 
     /** The overlap of two rects, or null when they don't meet. */
     fun intersectOrNull(a: Rect, b: Rect): Rect? {

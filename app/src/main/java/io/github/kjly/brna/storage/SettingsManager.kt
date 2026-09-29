@@ -7,6 +7,7 @@ import io.github.kjly.brna.model.LayoutMode
 import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PenShortcuts
 
 /**
  * Persists user preferences (paper style, tool settings) across app sessions
@@ -32,6 +33,11 @@ object SettingsManager {
     private const val KEY_CUSTOM_BG_COLOR    = "customBgColor"
     private const val KEY_CUSTOM_GRID_COLOR  = "customGridColor"
     private const val KEY_BORDER_COLOR       = "formatBorderColor"
+    private const val KEY_SNAP_POSITIONS     = "snapPositions"
+    private const val KEY_PEN_SOUNDS         = "penSounds"
+    private const val KEY_BLOCK_PINCH_ZOOM   = "blockPinchZoom"
+    private const val KEY_RESPECT_BORDERS    = "respectBorders"
+    private const val KEY_PEN_SHORTCUTS      = "penShortcuts"
 
     fun save(
         context: Context,
@@ -101,4 +107,65 @@ object SettingsManager {
     fun loadAllowFingerDrawing(context: Context): Boolean =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getBoolean(KEY_ALLOW_FINGER_DRAW, false)
+
+    /** Rnote's "Snap Positions", which it too keeps between sessions; off until switched on. */
+    fun loadSnapPositions(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SNAP_POSITIONS, false)
+
+    /** Rnote's "Block Pinch to Zoom", kept between sessions as Rnote keeps it. */
+    fun loadBlockPinchZoom(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_BLOCK_PINCH_ZOOM, false)
+
+    fun saveBlockPinchZoom(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_BLOCK_PINCH_ZOOM, on)
+            .apply()
+    }
+
+    /** Rnote's "Respect Borders When Pasting", kept between sessions as Rnote keeps it. */
+    fun loadRespectBorders(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_RESPECT_BORDERS, false)
+
+    fun saveRespectBorders(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_RESPECT_BORDERS, on)
+            .apply()
+    }
+
+    /** Rnote's "Pen Sounds", kept between sessions as Rnote keeps it; off until switched on. */
+    fun loadPenSounds(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PEN_SOUNDS, false)
+
+    fun savePenSounds(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_PEN_SOUNDS, on)
+            .apply()
+    }
+
+    /** Rnote's "Button Shortcuts", kept between sessions as Rnote keeps them; Rnote's defaults until changed. */
+    fun loadPenShortcuts(context: Context): PenShortcuts =
+        PenShortcuts.decode(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_PEN_SHORTCUTS, null)
+        )
+
+    fun savePenShortcuts(context: Context, shortcuts: PenShortcuts) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PEN_SHORTCUTS, shortcuts.encode())
+            .apply()
+    }
+
+    fun saveSnapPositions(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SNAP_POSITIONS, on)
+            .apply()
+    }
 }

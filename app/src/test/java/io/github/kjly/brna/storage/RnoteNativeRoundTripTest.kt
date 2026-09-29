@@ -3,6 +3,7 @@ package io.github.kjly.brna.storage
 import io.github.kjly.brna.model.NativeBackgroundConfig
 import io.github.kjly.brna.model.EllipseShape
 import io.github.kjly.brna.model.LineShape
+import io.github.kjly.brna.model.NativeBitmapElement
 import io.github.kjly.brna.model.NativeBrushStroke
 import io.github.kjly.brna.model.NativeShapeElement
 import io.github.kjly.brna.model.RectShape
@@ -202,7 +203,9 @@ class RnoteNativeRoundTripTest {
             )
         )
         val flags = parsed.elements.map { (it as NativeBrushStroke).isHighlighter }
-        assertEquals(listOf(false, true), flags)
+        // Both survive with their layer; Rnote draws the highlighter layer beneath the
+        // ink (`Ord for StrokeLayer`), so in draw order the highlighter comes first.
+        assertEquals(listOf(true, false), flags)
     }
 
     @Test
@@ -444,6 +447,40 @@ class RnoteNativeRoundTripTest {
         assertEquals(2, freehand.points.size)
         assertEquals(3f, freehand.strokeWidth, eps)
         assertEquals(9f, freehand.maxX, eps)
+    }
+
+    @Test
+    fun `an image inserted here is written on Rnote's image layer and reads back unchanged`() {
+        val pixels = java.util.Base64.getEncoder().encodeToString(ByteArray(3 * 2 * 4) { it.toByte() })
+        val image = NativeEditing.createImage(pixels, 3, 2, NativeEditing.ImagePlacement(10f, 20f, 0.5f))!!
+        val bytes = ByteArrayOutputStream()
+            .also { RnoteNativeSerializer.serialize(it, docWith().copy(elements = listOf(image))) }
+            .toByteArray()
+        val text = java.util.zip.GZIPInputStream(ByteArrayInputStream(bytes))
+            .bufferedReader(Charsets.UTF_8).readText()
+
+        // Strict JSON, with the fields desktop Rnote's BitmapImage deserializes.
+        val snapshot = org.json.JSONObject(text).getJSONObject("data").getJSONObject("engine_snapshot")
+        val written = snapshot.getJSONArray("stroke_components").getJSONObject(1)
+            .getJSONObject("value").getJSONObject("bitmapimage")
+        val inner = written.getJSONObject("image")
+        assertEquals(pixels, inner.getString("data"))
+        assertEquals(3, inner.getInt("pixel_width"))
+        assertEquals("R8g8b8a8Premultiplied", inner.getString("memory_format"))
+        assertEquals(9, written.getJSONObject("rectangle").getJSONObject("transform").getJSONArray("affine").length())
+        assertEquals(
+            "image",
+            snapshot.getJSONArray("chrono_components").getJSONObject(1).getJSONObject("value").getString("layer")
+        )
+
+        val read = RnoteNativeParser.parse(ByteArrayInputStream(bytes)).elements.single() as NativeBitmapElement
+        assertEquals(pixels, read.rgbaBase64)
+        assertEquals(3, read.bmpWidth)
+        assertEquals(2, read.bmpHeight)
+        assertEquals(10f, read.minX, eps)
+        assertEquals(20f, read.minY, eps)
+        assertEquals(11.5f, read.maxX, eps)
+        assertEquals(21f, read.maxY, eps)
     }
 
     @Test

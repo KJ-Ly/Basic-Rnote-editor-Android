@@ -13,12 +13,19 @@ import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.NativePatternType
 import io.github.kjly.brna.model.NativeShapeElement
 import io.github.kjly.brna.model.NativeTextElement
+import io.github.kjly.brna.model.NativeVectorImageElement
+import io.github.kjly.brna.model.PathOp
+import io.github.kjly.brna.model.PathShape
 import io.github.kjly.brna.model.RectShape
 import io.github.kjly.brna.model.RnoteNativeColor
 import io.github.kjly.brna.model.RnoteNativeDocument
+import io.github.kjly.brna.model.RoughStyle
+import io.github.kjly.brna.model.SegmentCurve
 import io.github.kjly.brna.model.NoteDocument
 import io.github.kjly.brna.model.PressureCurve
+import io.github.kjly.brna.model.TexturedStyle
 import io.github.kjly.brna.model.PaperPattern
+import io.github.kjly.brna.render.RoughShapes
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.io.OutputStreamWriter
@@ -48,8 +55,8 @@ object RnoteNativeSerializer {
 
     fun serialize(outputStream: OutputStream, doc: RnoteNativeDocument) {
         GZIPOutputStream(outputStream).use { gzip ->
-            OutputStreamWriter(gzip, Charsets.UTF_8).use { writer ->
-                writer.write(buildJson(doc))
+            OutputStreamWriter(gzip, Charsets.UTF_8).buffered(WRITE_BUFFER_CHARS).use { writer ->
+                writeJson(doc, writer)
             }
         }
     }
@@ -79,7 +86,7 @@ object RnoteNativeSerializer {
             // Rnote's `Element::new` clamps pressure to [0, 1] and its serde reader
             // assumes that range; Android reports stylus pressure that can exceed 1.0.
             val pts = stroke.points.map {
-                io.github.kjly.brna.model.NativeStrokePoint(it.x, it.y, it.pressure.coerceIn(0f, 1f))
+                io.github.kjly.brna.model.NativeStrokePoint(it.x, it.y, it.pressure.coerceIn(0f, 1f), it.curve)
             }
             val color = RnoteNativeColor(
                 stroke.color.red, stroke.color.green, stroke.color.blue, stroke.color.alpha
@@ -90,7 +97,9 @@ object RnoteNativeSerializer {
             val maxY = pts.maxOfOrNull { it.y } ?: 0f
             NativeBrushStroke(
                 pts, stroke.strokeWidth, color, stroke.isHighlighter,
-                minX, minY, maxX, maxY, stroke.pressureCurve
+                minX, minY, maxX, maxY, stroke.pressureCurve, stroke.textured,
+                // A desktop stroke nothing has changed goes back exactly as it came.
+                raw = stroke.source?.takeIf { it.describes(stroke) }?.json
             )
         }
 
@@ -105,14 +114,22 @@ object RnoteNativeSerializer {
         val ink = inkBounds(allElements)
         var minX = 0f; var minY = 0f; var maxX = pageW; var maxY = pageH
         when (doc.paperStyle.layoutMode) {
-            // A fixed-size document is the format box, full stop. Content drawn outside it
-            // is still kept (Rnote keeps it too) but does not grow the page.
-            LayoutMode.FIXED_SIZE -> Unit
+            // A fixed-size document is its pages of the format, one below the other.
+            // Content drawn outside them is still kept (Rnote keeps it too) but does not
+            // add a page: only Add Page and Resize to Fit Content do, in Rnote as here.
+            LayoutMode.FIXED_SIZE -> maxY = pageH * doc.paperStyle.fixedPages
 
             // Width is pinned to the format; height is the content plus one page of room
             // to keep writing — the +height is Rnote's, not padding of our own.
             LayoutMode.CONTINUOUS_VERTICAL ->
                 maxY = maxOf(pageH, (ink?.maxY ?: 0f).coerceAtLeast(0f) + pageH)
+
+            // Anchored at the origin like Rnote's `resize_doc_semi_infinite_layout`: the
+            // extent only ever reaches out to the right and down.
+            LayoutMode.SEMI_INFINITE -> if (ink != null) {
+                if (ink.maxX > maxX) maxX = ink.maxX
+                if (ink.maxY > maxY) maxY = ink.maxY
+            }
 
             // No bounds to respect, so it is the page widened to cover everything.
             // Infinite-layout content sits at negative coordinates routinely.
@@ -131,7 +148,9 @@ object RnoteNativeSerializer {
                 color        = bgColor,
                 pattern      = nativePattern,
                 patternWidth = doc.paperStyle.gridSpacingPx,
-                patternHeight = doc.paperStyle.gridSpacingPx,
+                // Rnote's `pattern_size` is two numbers; writing the width twice lost a
+                // height set on either side, and ruled paper is where they differ.
+                patternHeight = doc.paperStyle.patternHeightPx,
                 patternColor = gridColor
             ),
             elements = allElements,
@@ -167,7 +186,8 @@ object RnoteNativeSerializer {
         for (el in elements) {
             val pad = when (el) {
                 is NativeBrushStroke   -> el.strokeWidth / 2f
-                is NativeShapeElement  -> el.strokeWidth / 2f
+                // A rough shape's bounds leave room for its wobble, as Rnote's do.
+                is NativeShapeElement  -> RoughShapes.margin(el)
                 else                   -> 0f
             }
             if (el.minX - pad < minX) minX = el.minX - pad
@@ -180,7 +200,12 @@ object RnoteNativeSerializer {
 
     // ── JSON builder ──────────────────────────────────────────────────────────
 
-    private fun buildJson(doc: RnoteNativeDocument): String {
+    /**
+     * Writes the whole file to [out]. Built piecewise rather than as one string: an image
+     * is megabytes of base64, and a note holding a few photos, built up as a single
+     * string and then copied out of it, ran autosave out of memory.
+     */
+    private fun writeJson(doc: RnoteNativeDocument, out: java.io.Writer) {
         val sb = StringBuilder()
         sb.append("""{"version":"0.14.2","data":{"engine_snapshot":{""")
         sb.append(""""document":""")
@@ -193,17 +218,52 @@ object RnoteNativeSerializer {
         sb.append(""","stroke_components":[{"value":null,"version":0}""")
         doc.elements.forEach { el ->
             sb.append(",{\"value\":")
-            sb.appendElement(el)
+            val rawImage = (el as? NativeBitmapElement)?.raw
+            if (rawImage != null) {
+                // Straight into the stream, the pixels never copied into the builder.
+                out.append(sb)
+                sb.setLength(0)
+                out.write("{\"bitmapimage\":")
+                writeTree(rawImage, out)
+                out.write("}")
+            } else {
+                sb.appendElement(el)
+            }
             sb.append(""","version":1}""")
+            if (sb.length >= WRITE_BUFFER_CHARS) {
+                out.append(sb)
+                sb.setLength(0)
+            }
         }
 
         sb.append("""],"chrono_components":[{"value":null,"version":0}""")
         doc.elements.forEachIndexed { i, el ->
-            val layer = if (el is NativeBrushStroke && el.isHighlighter) "\"highlighter\"" else """{"user_layer":0}"""
+            val layer = when {
+                el is NativeBrushStroke && el.isHighlighter -> "\"highlighter\""
+                // PDF pages sit on Rnote's document layer, underneath everything else.
+                el is NativeVectorImageElement ->
+                    if (el.layer == "document") "\"document\"" else "\"image\""
+                // Rnote's default layer for images; a bitmap-imported PDF page is "document".
+                el is NativeBitmapElement ->
+                    if (el.layer == "document") "\"document\"" else "\"image\""
+                else -> """{"user_layer":0}"""
+            }
             sb.append(""",{"value":{"t":${i + 1},"layer":$layer},"version":1}""")
         }
         sb.append("""],"chrono_counter":${doc.elements.size}}}}""")
-        return sb.toString()
+        out.append(sb)
+    }
+
+    /** How much is gathered before it goes to the stream, in chars. */
+    private const val WRITE_BUFFER_CHARS = 64 * 1024
+
+    private val treeAdapter = com.google.gson.Gson().getAdapter(com.google.gson.JsonElement::class.java)
+
+    /** [tree] as [com.google.gson.JsonElement.toString] writes it, byte for byte, but streamed. */
+    private fun writeTree(tree: com.google.gson.JsonElement, out: java.io.Writer) {
+        val writer = com.google.gson.stream.JsonWriter(out)
+        writer.isLenient = true
+        treeAdapter.write(writer, tree)
     }
 
     // ── Document block ────────────────────────────────────────────────────────
@@ -251,18 +311,42 @@ object RnoteNativeSerializer {
             is NativeTextElement  -> appendTextElement(el)
             is NativeBitmapElement -> appendBitmapElement(el)
             is NativeShapeElement  -> appendShapeElement(el)
+            is NativeVectorImageElement -> appendVectorImage(el)
         }
     }
 
     // ── BrushStroke ───────────────────────────────────────────────────────────
 
     private fun StringBuilder.appendBrushStroke(el: NativeBrushStroke) {
+        el.raw?.let { append("""{"brushstroke":""").append(it).append('}'); return }
         append("""{"brushstroke":{""")
         append(""""path":""")
         appendPenPath(el.points)
         append(""","style":""")
-        appendSmoothStyle(el.color, el.strokeWidth, el.pressureCurve)
+        val textured = el.textured
+        if (textured != null) {
+            appendTexturedStyle(el.color, el.strokeWidth, el.pressureCurve, textured)
+        } else {
+            appendSmoothStyle(el.color, el.strokeWidth, el.pressureCurve)
+        }
         append("""}}""")
+    }
+
+    /** Rnote's `TexturedOptions`, with the names and in the order it writes them. */
+    private fun StringBuilder.appendTexturedStyle(
+        color: RnoteNativeColor,
+        strokeWidth: Float,
+        pressureCurve: PressureCurve,
+        textured: TexturedStyle
+    ) {
+        append("""{"textured":{""")
+        append(""""seed":${TexturedStyle.seedJson(textured.seed)},""")
+        append(""""stroke_width":$strokeWidth,""")
+        append(""""stroke_color":${color.toJson()},""")
+        append(""""density":${textured.density},""")
+        append(""""distribution":"${textured.distribution.apiName}",""")
+        append(""""pressure_curve":"${pressureCurve.apiName}"""")
+        append("}}")
     }
 
     /** Rnote's `PenPath`: a required `start` element plus a list of `segments` (no legacy alias). */
@@ -272,8 +356,15 @@ object RnoteNativeSerializer {
         append(""","segments":[""")
         for (i in 1 until points.size) {
             if (i > 1) append(',')
-            append("""{"lineto":{"end":""")
-            appendPathPoint(points[i])
+            val pt = points[i]
+            // Rnote's `Segment` variants, their fields in its order.
+            when (val curve = pt.curve) {
+                null -> append("""{"lineto":{"end":""")
+                is SegmentCurve.Quad -> append("""{"quadbezto":{"cp":[${curve.cx},${curve.cy}],"end":""")
+                is SegmentCurve.Cubic ->
+                    append("""{"cubbezto":{"cp1":[${curve.c1x},${curve.c1y}],"cp2":[${curve.c2x},${curve.c2y}],"end":""")
+            }
+            appendPathPoint(pt)
             append("""}}""")
         }
         append("]}")
@@ -306,7 +397,15 @@ object RnoteNativeSerializer {
 
     // ── TextElement ───────────────────────────────────────────────────────────
 
+    /** `{"<variant>": <the element as read>}` — see the `raw` fields on the model. */
+    private fun StringBuilder.appendRaw(variant: String, raw: com.google.gson.JsonElement) {
+        append("{\"").append(variant).append("\":")
+        append(raw.toString())
+        append("}")
+    }
+
     private fun StringBuilder.appendTextElement(el: NativeTextElement) {
+        el.raw?.let { appendRaw("textstroke", it); return }
         val tf = el.transform
         append("""{"textstroke":{""")
         append(""""text":${jsonString(el.text)},""")
@@ -326,6 +425,7 @@ object RnoteNativeSerializer {
     // ── BitmapElement ─────────────────────────────────────────────────────────
 
     private fun StringBuilder.appendBitmapElement(el: NativeBitmapElement) {
+        el.raw?.let { appendRaw("bitmapimage", it); return }
         // Re-encode pixels to PNG Base64
         val bmp = Bitmap.createBitmap(el.bmpWidth, el.bmpHeight, Bitmap.Config.ARGB_8888)
         bmp.setPixels(el.pixels, 0, el.bmpWidth, 0, 0, el.bmpWidth, el.bmpHeight)
@@ -345,6 +445,18 @@ object RnoteNativeSerializer {
         append("}}}")
     }
 
+    // ── VectorImage ───────────────────────────────────────────────────────────
+
+    /** The mirror of `parseVectorImage`; the SVG goes back exactly as it was read. */
+    private fun StringBuilder.appendVectorImage(el: NativeVectorImageElement) {
+        append("""{"vectorimage":{"svg_data":""")
+        append(jsonString(el.svgData))
+        append(""","intrinsic_size":[${el.intrinsicWidth},${el.intrinsicHeight}]""")
+        append(""","rectangle":{"cuboid":{"half_extents":[${el.halfExtentX},${el.halfExtentY}]},"transform":""")
+        appendAffine(el.transform)
+        append("}}}")
+    }
+
     // ── ShapeElement ──────────────────────────────────────────────────────────
 
     /**
@@ -353,6 +465,7 @@ object RnoteNativeSerializer {
      * file under the same name, so the two stay in step by construction.
      */
     private fun StringBuilder.appendShapeElement(el: NativeShapeElement) {
+        el.raw?.let { appendRaw("shapestroke", it); return }
         append("""{"shapestroke":{"shape":{""")
         when (val s = el.shape) {
             is LineShape    -> append(""""line":{"start":[${s.x1},${s.y1}],"end":[${s.x2},${s.y2}]}""")
@@ -366,9 +479,45 @@ object RnoteNativeSerializer {
                 appendAffine(s.transform)
                 append("}")
             }
+            // Only ever read from a file, so it always has `raw` and never gets here; a
+            // polyline through its on-curve points is the closest fallback there is.
+            is PathShape -> {
+                val pts = s.ops.mapNotNull {
+                    when (it) {
+                        is PathOp.MoveTo -> it.x to it.y
+                        is PathOp.LineTo -> it.x to it.y
+                        is PathOp.QuadTo -> it.x to it.y
+                        is PathOp.CubicTo -> it.x to it.y
+                        PathOp.Close -> null
+                    }
+                }
+                val first = pts.firstOrNull() ?: (0f to 0f)
+                append(""""polyline":{"start":[${first.first},${first.second}],"path":[""")
+                append(pts.drop(1).joinToString(",") { "[${it.first},${it.second}]" })
+                append("]}")
+            }
         }
         append("""},"style":""")
-        appendSmoothStyle(el.color, el.strokeWidth, fillColor = el.fillColor)
+        val rough = el.rough
+        if (rough != null) appendRoughStyle(el.color, el.strokeWidth, el.fillColor, rough)
+        else appendSmoothStyle(el.color, el.strokeWidth, fillColor = el.fillColor)
+        append("}}")
+    }
+
+    /** Rnote's `RoughOptions`, with the names and in the order it writes them. */
+    private fun StringBuilder.appendRoughStyle(
+        color: RnoteNativeColor,
+        strokeWidth: Float,
+        fillColor: RnoteNativeColor,
+        rough: RoughStyle
+    ) {
+        append("""{"rough":{""")
+        append(""""stroke_color":${color.toJson()},""")
+        append(""""stroke_width":$strokeWidth,""")
+        append(""""fill_color":${fillColor.toJson()},""")
+        append(""""fill_style":"${rough.fillStyle.apiName}",""")
+        append(""""hachure_angle":${rough.hachureAngle},""")
+        append(""""seed":${TexturedStyle.seedJson(rough.seed)}""")
         append("}}")
     }
 

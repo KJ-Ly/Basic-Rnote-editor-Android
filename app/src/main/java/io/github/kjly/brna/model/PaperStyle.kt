@@ -68,7 +68,13 @@ data class PaperStyle(
     /** Whether to show the green × origin indicator. */
     val showOriginIndicator: Boolean = true,
     /** Pattern spacing height (independent from width for non-square patterns). */
-    val customPatternHeightPx: Float = 0f
+    val customPatternHeightPx: Float = 0f,
+    /**
+     * How many pages a Fixed Size document has, one below the other: Rnote keeps that
+     * document's height as it is and only changes it through Add Page, Remove Page and
+     * Resize to Fit Content (see [FixedPages]). The document's own, never a preference.
+     */
+    val fixedPageCount: Int = 1
 ) {
     val currentBackgroundColor: Color
         get() = customBackgroundColor ?: if (isDarkMode) backgroundColorDark else backgroundColorLight
@@ -104,4 +110,8 @@ data class PaperStyle(
             isLandscape -> pageSize.widthPx
             else -> pageSize.heightPx
         }
+
+    /** The pages of a Fixed Size document: [fixedPageCount], and never fewer than one. */
+    val fixedPages: Int
+        get() = fixedPageCount.coerceAtLeast(1)
 }

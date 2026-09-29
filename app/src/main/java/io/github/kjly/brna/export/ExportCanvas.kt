@@ -3,6 +3,7 @@ package io.github.kjly.brna.export
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.Stroke
 
 /**
@@ -23,6 +24,9 @@ interface ExportCanvas {
 
     /** Fills one ink stroke's outline. */
     fun fillStroke(stroke: Stroke)
+
+    /** Draws one desktop element this app doesn't edit: a PDF page, image, text or shape. */
+    fun drawNative(element: NativeCanvasElement)
 
     /** Runs [block] with drawing clipped to [rect]. */
     fun clipped(rect: Rect, block: () -> Unit)

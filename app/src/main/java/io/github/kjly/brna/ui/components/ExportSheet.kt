@@ -51,6 +51,8 @@ fun ExportSheet(
     prefs: ExportPrefs,
     pageCount: Int,
     hasSelection: Boolean,
+    /** Shows the "pages follow the imported PDF" switch. */
+    hasImportedPages: Boolean = false,
     onPrefsChanged: (ExportPrefs) -> Unit,
     onDismiss: () -> Unit,
     onExport: () -> Unit
@@ -72,9 +74,9 @@ fun ExportSheet(
     }
 
     // Page order only changes anything once a document is cut into pages, which for a
-    // single-file export means PDF and nothing else.
+    // single-file export means PDF and Xournal++.
     val showPageOrder = pageCount > 1 &&
-        (prefs.scope == ExportScope.PAGES || prefs.format == ExportFormat.PDF)
+        (prefs.scope == ExportScope.PAGES || prefs.format == ExportFormat.PDF || prefs.format == ExportFormat.XOPP)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -143,6 +145,8 @@ fun ExportSheet(
                 Spacer(Modifier.height(16.dp))
 
                 // ── Rnote's three shared switches ─────────────────────────────
+                // Rnote shows them for Xournal++ too, where they change nothing; left out.
+                if (prefs.format != ExportFormat.XOPP) {
                 ExportLabel("OPTIONS", onSurfaceDim)
                 ExportSwitchRow(
                     label = "Background",
@@ -162,6 +166,15 @@ fun ExportSheet(
                     onCheckedChange = { onPrefsChanged(prefs.copy(optimizePrinterOutput = it)) },
                     onSurface = onSurface, accent = accent, isDark = isDark
                 )
+                }
+                if (hasImportedPages && prefs.scope != ExportScope.SELECTION) {
+                    ExportSwitchRow(
+                        label = "Pages follow imported PDF",
+                        checked = prefs.pagesFromImportedPdf,
+                        onCheckedChange = { onPrefsChanged(prefs.copy(pagesFromImportedPdf = it)) },
+                        onSurface = onSurface, accent = accent, isDark = isDark
+                    )
+                }
 
                 // ── Page order ────────────────────────────────────────────────
                 if (showPageOrder) {

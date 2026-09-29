@@ -244,4 +244,47 @@ class DocumentRoundTripTest {
         )
         assertEquals(LayoutMode.INFINITE, reloaded.paperStyle.layoutMode)
     }
+
+    @Test
+    fun `a fixed size document is written as tall as its pages`() {
+        // Rnote keeps a Fixed Size document's height; writing one page for it cut the
+        // pages added on the laptop off the document.
+        val threePages = documentWith(LayoutMode.FIXED_SIZE, strokes = emptyList()).let {
+            it.copy(paperStyle = it.paperStyle.copy(fixedPageCount = 3))
+        }
+        val native = RnoteNativeSerializer.bridgeToNative(threePages)
+        assertEquals(0f, native.originY, eps)
+        assertEquals(1123f, native.totalWidth, eps)
+        assertEquals(3 * 1587f, native.totalHeight, eps)
+    }
+
+    @Test
+    fun `the pages of a fixed size document survive save and reopen`() {
+        val threePages = documentWith(LayoutMode.FIXED_SIZE).let {
+            it.copy(paperStyle = it.paperStyle.copy(fixedPageCount = 3))
+        }
+        assertEquals(3, throughRnote(threePages).paperStyle.fixedPages)
+        assertEquals(
+            3,
+            DocumentSerializer.parseJson(DocumentSerializer.toJson(threePages)).paperStyle.fixedPages
+        )
+    }
+
+    @Test
+    fun `a single-page fixed size document stays one page`() {
+        assertEquals(1, throughRnote(documentWith(LayoutMode.FIXED_SIZE)).paperStyle.fixedPages)
+    }
+
+    @Test
+    fun `the pattern's height is written as its own, not as its width again`() {
+        val ruled = documentWith(LayoutMode.INFINITE).let {
+            it.copy(paperStyle = it.paperStyle.copy(customGridSpacingPx = 20f, customPatternHeightPx = 30f))
+        }
+        val native = RnoteNativeSerializer.bridgeToNative(ruled)
+        assertEquals(20f, native.background.patternWidth, eps)
+        assertEquals(30f, native.background.patternHeight, eps)
+        val reloaded = throughRnote(ruled)
+        assertEquals(20f, reloaded.paperStyle.gridSpacingPx, eps)
+        assertEquals(30f, reloaded.paperStyle.patternHeightPx, eps)
+    }
 }

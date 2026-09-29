@@ -27,7 +27,7 @@ object ExportPattern {
         if (paperStyle.pattern == PaperPattern.BLANK) return
 
         // Rnote's background carries independent x/y pattern spacing, and ruled paper is
-        // the case where they differ; the live canvas only uses the x spacing for both.
+        // the case where they differ; rows, ruled lines and isometric patterns go by y.
         val sx = paperStyle.gridSpacingPx
         val sy = paperStyle.patternHeightPx
         if (sx < 0.5f || sy < 0.5f) return
@@ -60,9 +60,9 @@ object ExportPattern {
                 }
             }
 
-            PaperPattern.ISO_GRID -> drawIsoGrid(canvas, color, area, sx)
+            PaperPattern.ISO_GRID -> drawIsoGrid(canvas, color, area, sy)
 
-            PaperPattern.ISO_DOTS -> drawIsoDots(canvas, color, area, sx)
+            PaperPattern.ISO_DOTS -> drawIsoDots(canvas, color, area, sy)
 
             PaperPattern.BLANK -> Unit
         }
@@ -92,51 +92,52 @@ object ExportPattern {
 
     // ── Isometric patterns ────────────────────────────────────────────────────
 
-    /** Row pitch of an equilateral-triangle lattice of horizontal spacing [spacing]. */
-    private fun isoRowHeight(spacing: Float) = spacing * sqrt(3f) / 2f
+    /** Column pitch of Rnote's isometric lattice: triangles of side [spacing] on an upright edge. */
+    private fun isoColumnWidth(spacing: Float) = spacing * sqrt(3f) / 2f
 
+    /**
+     * Rnote's `gen_iso_grid_pattern`: upright lines a column apart, crossed by the two
+     * families y = ±x/√3 + n·spacing.
+     */
     private fun drawIsoGrid(canvas: ExportCanvas, color: Color, area: Rect, spacing: Float) {
-        val rowH = isoRowHeight(spacing)
+        val column = isoColumnWidth(spacing)
         val w = PatternMetrics.LINE_WIDTH
 
-        forEachStep(area.top, area.bottom, rowH) { y ->
-            canvas.drawLine(area.left, y, area.right, y, w, color)
+        forEachStep(area.left, area.right, column) { x ->
+            canvas.drawLine(x, area.top, x, area.bottom, w, color)
         }
 
-        // The two diagonal families. A descending line through (k*spacing, 0) has moved
-        // (y / rowH) * (spacing / 2) to the right by the time it reaches y; the ascending
-        // family mirrors it.
+        val slope = 1f / sqrt(3f)
         for (dir in intArrayOf(1, -1)) {
-            val shiftTop = dir * (area.top / rowH) * (spacing / 2f)
-            val shiftBottom = dir * (area.bottom / rowH) * (spacing / 2f)
-            val kMin = floor((area.left - maxOf(shiftTop, shiftBottom)) / spacing).toInt()
-            val kMax = ceil((area.right - minOf(shiftTop, shiftBottom)) / spacing).toInt()
-            if (kMax.toLong() - kMin.toLong() > MAX_ELEMENTS) return
-            for (k in kMin..kMax) {
-                val base = k * spacing
-                canvas.drawLine(base + shiftTop, area.top, base + shiftBottom, area.bottom, w, color)
+            val atLeft = dir * slope * area.left
+            val atRight = dir * slope * area.right
+            val nMin = floor((area.top - maxOf(atLeft, atRight)) / spacing).toInt()
+            val nMax = ceil((area.bottom - minOf(atLeft, atRight)) / spacing).toInt()
+            if (nMax.toLong() - nMin.toLong() > MAX_ELEMENTS) return
+            for (n in nMin..nMax) {
+                canvas.drawLine(area.left, atLeft + n * spacing, area.right, atRight + n * spacing, w, color)
             }
         }
     }
 
+    /** Rnote's `gen_iso_dots_pattern`: a hexagon on every corner, every other column half a step down. */
     private fun drawIsoDots(canvas: ExportCanvas, color: Color, area: Rect, spacing: Float) {
-        val rowH = isoRowHeight(spacing)
+        val column = isoColumnWidth(spacing)
         val h = PatternMetrics.ISO_DOT_HEIGHT
 
-        var row = ceil(area.top / rowH).toInt()
-        var y = row * rowH
-        while (y <= area.bottom) {
-            // Every other row is offset by half a step — that is what makes it isometric.
-            val xOffset = if (row % 2 != 0) spacing / 2f else 0f
-            var k = ceil((area.left - xOffset) / spacing).toInt()
-            var x = k * spacing + xOffset
-            while (x <= area.right) {
+        var k = ceil(area.left / column).toInt()
+        var x = k * column
+        while (x <= area.right) {
+            val shift = if (k % 2 != 0) spacing / 2f else 0f
+            var n = ceil((area.top - shift) / spacing).toInt()
+            var y = n * spacing + shift
+            while (y <= area.bottom) {
                 canvas.fillPolygon(hexagon(x, y, h), color)
-                k++
-                x = k * spacing + xOffset
+                n++
+                y = n * spacing + shift
             }
-            row++
-            y = row * rowH
+            k++
+            x = k * column
         }
     }
 

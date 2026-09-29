@@ -8,6 +8,7 @@ composeBom = "2024.11.00"
 materialIconsExtended = "1.7.5"
 junit = "4.13.2"
 json = "20250107"
+motionPrediction = "1.0.0-beta01"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -20,6 +21,7 @@ androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIconsExtended" }
+androidx-input-motionprediction = { group = "androidx.input", name = "input-motionprediction", version.ref = "motionPrediction" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 # Real org.json, shadowing the android.jar stub the JVM test classpath would otherwise use.
 json = { group = "org.json", name = "json", version.ref = "json" }

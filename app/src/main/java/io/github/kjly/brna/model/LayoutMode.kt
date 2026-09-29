@@ -7,6 +7,8 @@ package io.github.kjly.brna.model
 enum class LayoutMode(val displayName: String, val apiName: String) {
     FIXED_SIZE("Fixed Size", "fixed_size"),
     CONTINUOUS_VERTICAL("Continuous Vertical", "continuous_vertical"),
+    /** Unbounded towards positive x/y only; the origin page is the top-left corner. */
+    SEMI_INFINITE("Semi Infinite", "semi_infinite"),
     INFINITE("Infinite", "infinite");
 
     companion object {
@@ -20,10 +22,12 @@ enum class LayoutMode(val displayName: String, val apiName: String) {
 
         fun fromApiName(name: String): LayoutMode = when (name.lowercase().trim()) {
             "fixed_size" -> FIXED_SIZE
-            "continuous_vertical" -> CONTINUOUS_VERTICAL
-            // Rnote's SemiInfinite grows only towards positive x/y; of the three modes
-            // here, unbounded is much closer than a single fixed page.
-            "infinite", "semi_infinite" -> INFINITE
+            // "endless_vertical" is the name older Rnote versions wrote for it.
+            "continuous_vertical", "endless_vertical" -> CONTINUOUS_VERTICAL
+            // Its own mode, so a desktop note saved here keeps its layout instead of
+            // quietly turning into an Infinite one.
+            "semi_infinite" -> SEMI_INFINITE
+            "infinite" -> INFINITE
             else -> DEFAULT
         }
     }

@@ -3,6 +3,7 @@ package io.github.kjly.brna.export
 import android.graphics.pdf.PdfDocument
 import androidx.compose.ui.geometry.Rect
 import io.github.kjly.brna.model.CANVAS_DPI
+import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.PaperStyle
 import io.github.kjly.brna.model.Stroke
 import java.io.OutputStream
@@ -25,7 +26,8 @@ object PdfExporter {
         strokes: List<Stroke>,
         pages: List<Rect>,
         prefs: ExportPrefs,
-        out: OutputStream
+        out: OutputStream,
+        nativeElements: List<NativeCanvasElement> = emptyList()
     ): Boolean {
         if (pages.isEmpty()) return false
         val pdf = PdfDocument()
@@ -44,7 +46,8 @@ object PdfExporter {
                 // document origin either way, and clipping it to the page keeps a
                 // non-dividing spacing from bleeding over the edge.
                 DocumentPainter.paint(
-                    AndroidExportCanvas(canvas), paperStyle, strokes, page, prefs, listOf(page)
+                    AndroidExportCanvas(canvas), paperStyle, strokes, page, prefs, listOf(page),
+                    nativeElements
                 )
                 pdf.finishPage(pdfPage)
             }

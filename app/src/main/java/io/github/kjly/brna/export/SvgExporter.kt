@@ -1,6 +1,7 @@
 package io.github.kjly.brna.export
 
 import androidx.compose.ui.geometry.Rect
+import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.PaperStyle
 import io.github.kjly.brna.model.Stroke
 import java.util.Locale
@@ -17,14 +18,15 @@ object SvgExporter {
         strokes: List<Stroke>,
         region: Rect,
         prefs: ExportPrefs,
-        pages: List<Rect> = emptyList()
+        pages: List<Rect> = emptyList(),
+        nativeElements: List<NativeCanvasElement> = emptyList()
     ): String {
         val w = region.width.coerceAtLeast(1f)
         val h = region.height.coerceAtLeast(1f)
         fun n(v: Float) = String.format(Locale.ROOT, "%.3f", v)
 
         val body = StringBuilder()
-        DocumentPainter.paint(SvgExportCanvas(body), paperStyle, strokes, region, prefs, pages)
+        DocumentPainter.paint(SvgExportCanvas(body), paperStyle, strokes, region, prefs, pages, nativeElements)
 
         return buildString {
             append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n")

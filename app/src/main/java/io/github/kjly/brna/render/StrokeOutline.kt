@@ -1,6 +1,7 @@
 package io.github.kjly.brna.render
 
 import io.github.kjly.brna.model.PressureCurve
+import io.github.kjly.brna.model.SegmentCurve
 import io.github.kjly.brna.model.StrokePoint
 import kotlin.math.hypot
 
@@ -46,12 +47,14 @@ object StrokeOutline {
             if (end.x == start.x && end.y == start.y) continue
             singlePos = false
 
-            emitSegment(
-                sink,
-                prev, end,
-                curve.apply(strokeWidth, prev.pressure),
-                curve.apply(strokeWidth, end.pressure)
-            )
+            val startWidth = curve.apply(strokeWidth, prev.pressure)
+            val endWidth = curve.apply(strokeWidth, end.pressure)
+            val bend = end.curve
+            if (bend == null) {
+                emitSegment(sink, prev, end, startWidth, endWidth)
+            } else {
+                emitCurve(sink, prev, end, bend, startWidth, endWidth)
+            }
             prev = end
         }
 
@@ -59,6 +62,80 @@ object StrokeOutline {
             val width = curve.apply(strokeWidth, start.pressure)
             if (width > 0f) sink.circle(start.x, start.y, width * 0.5f)
         }
+    }
+
+    /**
+     * A `quadbezto` or `cubbezto` segment, as Rnote composes one: the curve cut into
+     * [BezierLines.count] straight pieces, the width running from [startWidth] to
+     * [endWidth] along them, and the lot outlined as one piece with a cap at either end
+     * (`compose_lines_variable_width`).
+     */
+    private fun emitCurve(
+        sink: Sink,
+        from: StrokePoint,
+        to: StrokePoint,
+        bend: SegmentCurve,
+        startWidth: Float,
+        endWidth: Float
+    ) {
+        val all = BezierLines.lines(from.x, from.y, to.x, to.y, bend)
+        // Upstream drops the zero-length pieces before anything else.
+        val lines = all.filter { it[2] != it[0] || it[3] != it[1] }
+        val n = lines.size
+        if (n == 0) return
+
+        val pos = ArrayList<FloatArray>(2 * n)
+        val neg = ArrayList<FloatArray>(2 * n)
+        for ((i, line) in lines.withIndex()) {
+            val lineStartWidth = startWidth + (endWidth - startWidth) * (i.toFloat() / n)
+            val lineEndWidth = startWidth + (endWidth - startWidth) * ((i + 1).toFloat() / n)
+            val dx = line[2] - line[0]
+            val dy = line[3] - line[1]
+            val len = hypot(dx, dy)
+            val nx = -dy / len
+            val ny = dx / len
+            pos += floatArrayOf(line[0] + nx * lineStartWidth * 0.5f, line[1] + ny * lineStartWidth * 0.5f)
+            neg += floatArrayOf(line[0] - nx * lineStartWidth * 0.5f, line[1] - ny * lineStartWidth * 0.5f)
+            pos += floatArrayOf(line[2] + nx * lineEndWidth * 0.5f, line[3] + ny * lineEndWidth * 0.5f)
+            neg += floatArrayOf(line[2] - nx * lineEndWidth * 0.5f, line[3] - ny * lineEndWidth * 0.5f)
+        }
+        val first = lines.first()
+        val last = lines.last()
+        val startLen = hypot(first[2] - first[0], first[3] - first[1])
+        val endLen = hypot(last[2] - last[0], last[3] - last[1])
+        val startDirX = (first[2] - first[0]) / startLen
+        val startDirY = (first[3] - first[1]) / startLen
+        val endDirX = (last[2] - last[0]) / endLen
+        val endDirY = (last[3] - last[1]) / endLen
+        val startPos = pos.first()
+        val startNeg = neg.first()
+        val endPos = pos.last()
+        val endNeg = neg.last()
+
+        if (startWidth > 0f && !startPos.contentEquals(startNeg)) {
+            val cap = startWidth * (2f / 3f)
+            sink.moveTo(startNeg[0], startNeg[1])
+            sink.cubicTo(
+                startNeg[0] - startDirX * cap, startNeg[1] - startDirY * cap,
+                startPos[0] - startDirX * cap, startPos[1] - startDirY * cap,
+                startPos[0], startPos[1]
+            )
+        } else {
+            sink.moveTo(startPos[0], startPos[1])
+        }
+        for (p in pos) sink.lineTo(p[0], p[1])
+        if (endWidth > 0f && !endPos.contentEquals(endNeg)) {
+            val cap = endWidth * (2f / 3f)
+            sink.cubicTo(
+                endPos[0] + endDirX * cap, endPos[1] + endDirY * cap,
+                endNeg[0] + endDirX * cap, endNeg[1] + endDirY * cap,
+                endNeg[0], endNeg[1]
+            )
+        } else {
+            sink.lineTo(endNeg[0], endNeg[1])
+        }
+        for (k in neg.indices.reversed()) sink.lineTo(neg[k][0], neg[k][1])
+        sink.close()
     }
 
     private fun emitSegment(

@@ -41,6 +41,18 @@ class ViewportStateTest {
     }
 
     @Test
+    fun `zooming about a point keeps that point where it is on screen`() {
+        val view = ViewportState(panOffset = Offset(30f, -40f), zoomScale = 1.5f, displayScale = 2f)
+        val middle = Offset(400f, 300f)
+        val under = view.screenToCanvas(middle)
+        val zoomed = view.zoomedAround(middle, 1.5f * 1.1f)
+        assertEquals(1.65f, zoomed.zoomScale, eps)
+        assertOffsetEquals(middle, zoomed.canvasToScreen(under))
+        // Clamped to Rnote's limits like any other zoom.
+        assertEquals(ViewportState.ZOOM_MAX, view.zoomedAround(middle, 100f).zoomScale, eps)
+    }
+
+    @Test
     fun `update clamps zoom to Rnote's camera limits and leaves pan alone`() {
         val viewport = ViewportState()
         assertEquals(ViewportState.ZOOM_MAX, viewport.update(Offset.Zero, 99f).zoomScale, eps)
@@ -108,5 +120,62 @@ class ViewportStateTest {
         val onScreen = returned.canvasToScreen(Offset.Zero)
         assertEquals(ViewportState.ORIGIN_MARGIN_PX, onScreen.x, eps)
         assertEquals(ViewportState.ORIGIN_MARGIN_PX, onScreen.y, eps)
+    }
+
+    @Test
+    fun `jumping to a page centres it at the top, at the same zoom`() {
+        val viewport = ViewportState(panOffset = Offset(-5000f, 300f), zoomScale = 0.5f, displayScale = 2f)
+        // Page 3 of an A4 column: top at 2 * 1122.5, 800 wide at an effective scale of 1.
+        val shown = viewport.showingPage(0f, 2245f, 800f, viewportWidthPx = 2000f)
+        assertOffsetEquals(Offset(600f, ViewportState.ORIGIN_MARGIN_PX - 2245f), shown.panOffset)
+        assertEquals(0.5f, shown.zoomScale, eps)
+        assertOffsetEquals(Offset(600f, ViewportState.ORIGIN_MARGIN_PX), shown.canvasToScreen(Offset(0f, 2245f)))
+    }
+
+    @Test
+    fun `jumping to a page to the right of the origin brings its left edge in`() {
+        val viewport = ViewportState(zoomScale = 2f)
+        val shown = viewport.showingPage(800f, 0f, 800f, viewportWidthPx = 1000f)
+        assertOffsetEquals(
+            Offset(ViewportState.ORIGIN_MARGIN_PX, ViewportState.ORIGIN_MARGIN_PX),
+            shown.canvasToScreen(Offset(800f, 0f))
+        )
+    }
+
+    @Test
+    fun `zoom to page width fits the page and Rnote's overshoot across the view, centred`() {
+        // The middle of the view is over the first page, at x = 400.
+        val viewport = ViewportState(panOffset = Offset(400f, -700f), zoomScale = 0.5f, displayScale = 2f)
+        val fitted = viewport.fittedToWidth(viewportWidthPx = 1600f, viewportHeightPx = 2400f, pageWidthPx = 800f)
+        // 800 units of page and 96 either side across 1600 px.
+        assertEquals(1600f / (800f + 2f * ViewportState.FIT_WIDTH_OVERSHOOT), fitted.effectiveScale, eps)
+        val left = fitted.canvasToScreen(Offset(0f, 0f)).x
+        val right = fitted.canvasToScreen(Offset(800f, 0f)).x
+        assertEquals(1600f - right, left, eps)
+    }
+
+    @Test
+    fun `zoom to page width keeps the middle of the view where it is, up and down`() {
+        val viewport = ViewportState(panOffset = Offset(40f, -900f), zoomScale = 1f, displayScale = 2f)
+        val middle = Offset(800f, 1200f)
+        val before = viewport.screenToCanvas(middle).y
+        val fitted = viewport.fittedToWidth(1600f, 2400f, 800f)
+        assertEquals(before, fitted.screenToCanvas(middle).y, eps)
+    }
+
+    @Test
+    fun `zoom to page width does nothing without a page`() {
+        val viewport = ViewportState(panOffset = Offset(12f, 34f), zoomScale = 1.3f)
+        assertEquals(viewport, viewport.fittedToWidth(1600f, 2400f, 0f))
+    }
+
+    @Test
+    fun `zoom to page width centres the page under the middle of the view, not the first`() {
+        // The middle is at x = 1100, over the second page of an infinite layout's row.
+        val viewport = ViewportState(panOffset = Offset(-300f, 0f), zoomScale = 0.5f, displayScale = 2f)
+        val fitted = viewport.fittedToWidth(1600f, 2400f, 800f)
+        val left = fitted.canvasToScreen(Offset(800f, 0f)).x
+        val right = fitted.canvasToScreen(Offset(1600f, 0f)).x
+        assertEquals(1600f - right, left, eps)
     }
 }

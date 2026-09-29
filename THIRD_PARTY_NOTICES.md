@@ -48,6 +48,29 @@ artwork survives a circular launcher mask, and rasterized once per density
 bucket (mdpi through xxxhdpi). No recoloring or redrawing of the Rnote artwork
 was done.
 
+## Pen sounds (`app/src/main/res/raw/*.ogg`)
+
+The pen sounds are desktop Rnote's own (`crates/rnote-engine/data/sounds/`),
+re-encoded from WAV to Ogg Vorbis to keep the app small; nothing else was changed.
+Rnote credits them in `crates/rnote-engine/data/sounds/LICENSES.md`, as below.
+
+- **`brush.ogg`** — "Pencil, Writing, Close, A" by
+  [InspectorJ](https://freesound.org/people/InspectorJ/), from
+  [freesound.org](https://freesound.org/people/InspectorJ/sounds/398271/).
+  License: [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/legalcode).
+- **`marker_00.ogg` – `marker_14.ogg`** — License:
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/legalcode).
+- **`typewriter_00.ogg` – `typewriter_29.ogg`** — cut from "Typewriter Machine" by
+  [KVProds](https://freesound.org/people/KVProds/), from
+  [freesound.org](https://freesound.org/people/KVProds/sounds/535891/). License:
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/legalcode).
+- **`typewriter_thump.ogg`** — not listed in Rnote's sound credits; as part of
+  Rnote it comes under Rnote's GPL-3.0, like this project.
+- **`typewriter_bell.ogg`, `typewriter_linefeed.ogg`** — cut from "Typewriter bell &
+  carriage reset" by [knufds](https://freesound.org/people/knufds/), from
+  [freesound.org](https://freesound.org/people/knufds/sounds/345955/). License:
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/legalcode).
+
 ## `.rnote` parser (`storage/RnoteNativeParser.kt`)
 
 The streaming `.rnote` reader was ported and adapted from **rnoteviewer-android**

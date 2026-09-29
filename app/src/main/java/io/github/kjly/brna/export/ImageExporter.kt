@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import androidx.compose.ui.geometry.Rect
+import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.PaperStyle
 import io.github.kjly.brna.model.Stroke
 import java.io.OutputStream
@@ -36,7 +37,8 @@ object ImageExporter {
         region: Rect,
         prefs: ExportPrefs,
         out: OutputStream,
-        pages: List<Rect> = emptyList()
+        pages: List<Rect> = emptyList(),
+        nativeElements: List<NativeCanvasElement> = emptyList()
     ): Boolean {
         val regionW = region.width.coerceAtLeast(1f)
         val regionH = region.height.coerceAtLeast(1f)
@@ -56,7 +58,7 @@ object ImageExporter {
             canvas.translate(-region.left, -region.top)
 
             DocumentPainter.paint(
-                AndroidExportCanvas(canvas), paperStyle, strokes, region, prefs, pages
+                AndroidExportCanvas(canvas), paperStyle, strokes, region, prefs, pages, nativeElements
             )
 
             val compressFormat =

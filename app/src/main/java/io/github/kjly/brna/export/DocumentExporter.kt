@@ -4,8 +4,12 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.compose.ui.geometry.Rect
+import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.NoteDocument
 import io.github.kjly.brna.model.Stroke
+import io.github.kjly.brna.storage.RnoteNativeSerializer
+import io.github.kjly.brna.storage.XoppConvert
+import io.github.kjly.brna.storage.XoppFile
 import java.io.OutputStream
 import java.util.Locale
 
@@ -24,7 +28,14 @@ object DocumentExporter {
 
     /** The pages this document has, in the order [prefs] asks for. Empty if it has none. */
     fun pagesFor(document: NoteDocument, prefs: ExportPrefs): List<Rect> =
-        ExportLayout.pageRects(document.paperStyle, document.strokes, prefs.pageOrder)
+        ExportLayout.pageRects(
+            document.paperStyle, document.strokes, prefs.pageOrder, document.nativeElements,
+            followImportedPages = prefs.pagesFromImportedPdf
+        )
+
+    /** Whether the document has imported PDF pages, which [ExportPrefs.pagesFromImportedPdf] follows. */
+    fun hasImportedPages(document: NoteDocument): Boolean =
+        document.nativeElements.any { it is io.github.kjly.brna.model.NativeVectorImageElement }
 
     /** The suggested file name for a single-file export, extension included. */
     fun fileNameFor(baseName: String, prefs: ExportPrefs): String =
@@ -32,29 +43,34 @@ object DocumentExporter {
 
     /**
      * [ExportScope.DOCUMENT] and [ExportScope.SELECTION] — a single file at [uri].
-     * [selection] is only read for the selection scope.
+     * [selection] and [selectedNatives] are only read for the selection scope.
      */
     fun exportSingle(
         context: Context,
         uri: Uri,
         document: NoteDocument,
         selection: List<Stroke>,
-        prefs: ExportPrefs
+        prefs: ExportPrefs,
+        selectedNatives: List<NativeCanvasElement> = emptyList()
     ): Result {
         val paperStyle = document.paperStyle
         val pages = pagesFor(document, prefs)
 
         val strokes: List<Stroke>
         val region: Rect
+        val natives: List<NativeCanvasElement>
         when (prefs.scope) {
             ExportScope.DOCUMENT -> {
                 strokes = document.strokes
-                region = ExportLayout.documentBounds(paperStyle, document.strokes)
+                natives = document.nativeElements
+                region = ExportLayout.documentBounds(paperStyle, document.strokes, natives)
             }
             ExportScope.SELECTION -> {
-                if (selection.isEmpty()) return Result.Failure("Nothing is selected")
+                // The selector holds text, shapes and images as well as ink.
+                if (selection.isEmpty() && selectedNatives.isEmpty()) return Result.Failure("Nothing is selected")
                 strokes = selection
-                region = ExportLayout.selectionBounds(selection, prefs.marginPx)
+                natives = selectedNatives
+                region = ExportLayout.selectionBounds(selection, prefs.marginPx, selectedNatives)
                     ?: return Result.Failure("The selection has no extent")
             }
             ExportScope.PAGES ->
@@ -65,21 +81,112 @@ object DocumentExporter {
             when (prefs.format) {
                 ExportFormat.SVG -> {
                     out.write(
-                        SvgExporter.export(paperStyle, strokes, region, prefs, pages)
+                        SvgExporter.export(paperStyle, strokes, region, prefs, pages, natives)
                             .toByteArray(Charsets.UTF_8)
                     )
                     true
                 }
                 ExportFormat.PNG, ExportFormat.JPEG ->
-                    ImageExporter.exportBitmap(paperStyle, strokes, region, prefs, out, pages)
+                    ImageExporter.exportBitmap(paperStyle, strokes, region, prefs, out, pages, natives)
                 ExportFormat.PDF -> {
                     // A document with no page grid is still one PDF page: the whole thing.
                     val pdfPages = pages.ifEmpty { listOf(region) }
-                    PdfExporter.export(paperStyle, strokes, pdfPages, prefs, out)
+                    PdfExporter.export(paperStyle, strokes, pdfPages, prefs, out, natives)
+                }
+                ExportFormat.XOPP -> {
+                    out.write(exportXopp(document, prefs, region))
+                    true
                 }
             }
         }
         return if (ok) Result.Success(1) else Result.Failure("Could not write the file")
+    }
+
+    /**
+     * The document as a Xournal++ file, as Rnote writes one (see [XoppConvert.fromNative]):
+     * the pages of the format grid with something on them — not the imported PDF's, which
+     * Rnote doesn't follow here — or, without pages, one round [region].
+     */
+    private fun exportXopp(document: NoteDocument, prefs: ExportPrefs, region: Rect): ByteArray {
+        val native = RnoteNativeSerializer.bridgeToNative(document)
+        val pages = pagesFor(document, prefs.copy(pagesFromImportedPdf = false)).ifEmpty { listOf(region) }
+            .map { XoppConvert.PageRect(it.left.toDouble(), it.top.toDouble(), it.right.toDouble(), it.bottom.toDouble()) }
+        // Rnote's `export_to_bitmap_image_bytes`: the element alone, no background, at 1.8.
+        val imagePrefs = ExportPrefs(
+            format = ExportFormat.PNG,
+            withBackground = false,
+            withPattern = false,
+            optimizePrinterOutput = false,
+            bitmapScaleFactor = XoppConvert.IMAGE_SCALE.toFloat()
+        )
+        val root = XoppConvert.fromNative(native, pages) { el ->
+            val bounds = Rect(el.minX, el.minY, el.maxX, el.maxY)
+            if (bounds.width <= 0f || bounds.height <= 0f) return@fromNative null
+            val png = java.io.ByteArrayOutputStream()
+            val drawn = ImageExporter.exportBitmap(
+                document.paperStyle, emptyList(), bounds, imagePrefs, png, emptyList(), listOf(el)
+            )
+            if (drawn) png.toByteArray() else null
+        }
+        return XoppFile.save(root)
+    }
+
+    /**
+     * One [region] of the document — a page, or what is on screen of a canvas without
+     * pages — as a single file at [uri], in [ExportPrefs.format]. What sharing a page sends.
+     */
+    fun exportRegion(
+        context: Context,
+        uri: Uri,
+        document: NoteDocument,
+        region: Rect,
+        prefs: ExportPrefs
+    ): Result {
+        val paperStyle = document.paperStyle
+        // The pages it touches, so the pattern stops at their edges as in any export.
+        val pages = pagesFor(document, prefs).filter { ExportLayout.intersectOrNull(it, region) != null }
+        val ok = writeTo(context, uri) { out ->
+            when (prefs.format) {
+                ExportFormat.SVG -> {
+                    out.write(
+                        SvgExporter.export(paperStyle, document.strokes, region, prefs, pages, document.nativeElements)
+                            .toByteArray(Charsets.UTF_8)
+                    )
+                    true
+                }
+                ExportFormat.PNG, ExportFormat.JPEG ->
+                    ImageExporter.exportBitmap(
+                        paperStyle, document.strokes, region, prefs, out, pages, document.nativeElements
+                    )
+                ExportFormat.PDF ->
+                    PdfExporter.export(paperStyle, document.strokes, listOf(region), prefs, out, document.nativeElements)
+                // Only ever offered for the whole document.
+                ExportFormat.XOPP -> false
+            }
+        }
+        return if (ok) Result.Success(1) else Result.Failure("Could not write the file")
+    }
+
+    /**
+     * The pages printing sends, as Rnote's "Print" sends them: the document's pages, or
+     * a canvas without any as a single page of everything on it.
+     */
+    fun printPages(document: NoteDocument, prefs: ExportPrefs): List<Rect> =
+        pagesFor(document, prefs).ifEmpty {
+            listOf(ExportLayout.documentBounds(document.paperStyle, document.strokes, document.nativeElements))
+        }
+
+    /** [pages] of [document] as a PDF into [out], which is left open. False on failure. */
+    fun writePdf(document: NoteDocument, pages: List<Rect>, prefs: ExportPrefs, out: OutputStream): Boolean =
+        PdfExporter.export(document.paperStyle, document.strokes, pages, prefs, out, document.nativeElements)
+
+    /**
+     * The name a shared file goes out under, which is what the receiving app shows:
+     * "<note> - page 03.png", "<note> - selection.png", or "<note>.pdf" without [detail].
+     */
+    fun sharedFileName(baseName: String, detail: String?, format: ExportFormat): String {
+        val stem = sanitize(baseName)
+        return if (detail == null) "$stem.${format.extension}" else "$stem - $detail.${format.extension}"
     }
 
     /**
@@ -133,14 +240,16 @@ object DocumentExporter {
                     ExportFormat.SVG -> {
                         out.write(
                             SvgExporter.export(
-                                document.paperStyle, document.strokes, page, prefs, listOf(page)
+                                document.paperStyle, document.strokes, page, prefs, listOf(page),
+                                document.nativeElements
                             ).toByteArray(Charsets.UTF_8)
                         )
                         true
                     }
                     else ->
                         ImageExporter.exportBitmap(
-                            document.paperStyle, document.strokes, page, prefs, out, listOf(page)
+                            document.paperStyle, document.strokes, page, prefs, out, listOf(page),
+                            document.nativeElements
                         )
                 }
             }

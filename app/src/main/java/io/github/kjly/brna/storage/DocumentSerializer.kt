@@ -9,6 +9,8 @@ import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
 import io.github.kjly.brna.model.NoteDocument
 import io.github.kjly.brna.model.Stroke
+import io.github.kjly.brna.model.TexturedDistribution
+import io.github.kjly.brna.model.TexturedStyle
 import io.github.kjly.brna.model.ToolType
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,6 +36,7 @@ object DocumentSerializer {
         // Omitting this let the layout reset to PaperStyle's default on every reload, the
         // same defect the .rnote writer had -- only to a different default.
         paperObj.put("layoutMode", document.paperStyle.layoutMode.name)
+        paperObj.put("fixedPageCount", document.paperStyle.fixedPages)
         root.put("paperStyle", paperObj)
 
         // Strokes Array
@@ -44,6 +47,14 @@ object DocumentSerializer {
             strokeObj.put("color", stroke.color.toArgb())
             strokeObj.put("width", stroke.strokeWidth.toDouble())
             strokeObj.put("toolType", stroke.toolType.name)
+            stroke.textured?.let { textured ->
+                strokeObj.put("textured", JSONObject().apply {
+                    // As text: a u64 seed does not fit JSONObject's numbers.
+                    put("seed", TexturedStyle.seedJson(textured.seed))
+                    put("density", textured.density)
+                    put("distribution", textured.distribution.apiName)
+                })
+            }
 
             val pointsArray = JSONArray()
             for (pt in stroke.points) {
@@ -99,7 +110,8 @@ object DocumentSerializer {
                 isDarkMode = isDarkMode,
                 dotDensityDpi = dotDensityDpi,
                 pageSize = pageSize,
-                layoutMode = layoutMode
+                layoutMode = layoutMode,
+                fixedPageCount = paperObj.optInt("fixedPageCount", 1)
             )
         }
 
@@ -138,13 +150,21 @@ object DocumentSerializer {
                     }
                 }
 
+                val textured = strokeObj.optJSONObject("textured")?.let { t ->
+                    TexturedStyle(
+                        seed = TexturedStyle.seedFromJson(t.optString("seed")),
+                        density = t.optDouble("density", TexturedStyle.DENSITY_DEFAULT),
+                        distribution = TexturedDistribution.fromApiName(t.optString("distribution"))
+                    )
+                }
                 strokesList.add(
                     Stroke(
                         id = strokeId,
                         points = pointsList,
                         color = Color(colorInt),
                         strokeWidth = width,
-                        toolType = toolType
+                        toolType = toolType,
+                        textured = textured
                     )
                 )
             }

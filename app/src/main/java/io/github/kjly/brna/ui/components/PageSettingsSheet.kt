@@ -1,6 +1,9 @@
 package io.github.kjly.brna.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -17,9 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropLandscape
 import androidx.compose.material.icons.filled.CropPortrait
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -56,6 +62,11 @@ import io.github.kjly.brna.model.MeasureUnit
 import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PenShortcuts
+import io.github.kjly.brna.model.ShortcutAction
+import io.github.kjly.brna.model.ShortcutKey
+import io.github.kjly.brna.model.ShortcutMode
+import io.github.kjly.brna.model.ToolType
 import kotlin.math.roundToInt
 
 /**
@@ -70,6 +81,9 @@ fun PageSettingsSheet(
     paperStyle: PaperStyle,
     onPaperStyleChanged: (PaperStyle) -> Unit,
     onDismiss: () -> Unit,
+    /** Rnote's "Button Shortcuts": what each pen and mouse button, and the two-finger long-press, do. */
+    penShortcuts: PenShortcuts = PenShortcuts(),
+    onPenShortcutsChanged: (PenShortcuts) -> Unit = {},
     dockedAsSidePanel: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -459,6 +473,30 @@ fun PageSettingsSheet(
                 accent = accent,
                 isDark = isDark
             )
+
+            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider(color = if (isDark) Color(0xFF3A3A4A) else Color(0xFFDDE0E5))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ═══════════════════════════════════════════════════════════════════
+            //  SECTION 4: BUTTON SHORTCUTS
+            // ═══════════════════════════════════════════════════════════════════
+
+            // Rnote's settings group of the same name: for each button, the pen it brings
+            // out and how (its RnPenShortcutRow, a pen and a mode).
+            SectionHeader("BUTTON SHORTCUTS", onSurface)
+            Spacer(modifier = Modifier.height(4.dp))
+            ShortcutKey.entries.forEach { key ->
+                val action = penShortcuts[key] ?: PenShortcuts.DEFAULTS.getValue(key)
+                ShortcutRow(
+                    key = key,
+                    action = action,
+                    onActionChanged = { onPenShortcutsChanged(penShortcuts.with(key, it)) },
+                    onSurface = onSurface,
+                    onSurfaceDim = onSurfaceDim,
+                    chipBg = chipBg
+                )
+            }
         }
     }
 
@@ -479,7 +517,7 @@ fun PageSettingsSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Page Settings",
+                        text = "Settings",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = onSurface,
@@ -504,6 +542,82 @@ fun PageSettingsSheet(
 }
 
 // ── Helper Composables ────────────────────────────────────────────────────────
+
+/** One of Rnote's shortcut rows: the button, then the pen it brings out and the mode. */
+@Composable
+private fun ShortcutRow(
+    key: ShortcutKey,
+    action: ShortcutAction,
+    onActionChanged: (ShortcutAction) -> Unit,
+    onSurface: Color,
+    onSurfaceDim: Color,
+    chipBg: Color
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        Text(text = key.title, fontSize = 14.sp, color = onSurface)
+        Text(text = key.subtitle, fontSize = 12.sp, color = onSurfaceDim)
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceMenu(
+                value = action.tool.displayName,
+                options = ToolType.entries.filter { it.isImplemented },
+                label = { it.displayName },
+                onSelected = { onActionChanged(action.copy(tool = it)) },
+                onSurface = onSurface,
+                chipBg = chipBg
+            )
+            ChoiceMenu(
+                value = action.mode.displayName,
+                options = ShortcutMode.entries,
+                label = { it.displayName },
+                onSelected = { onActionChanged(action.copy(mode = it)) },
+                onSurface = onSurface,
+                chipBg = chipBg
+            )
+        }
+    }
+}
+
+/** A value that opens a list of the others to pick from, as GTK's drop-downs do. */
+@Composable
+private fun <T> ChoiceMenu(
+    value: String,
+    options: List<T>,
+    label: (T) -> String,
+    onSelected: (T) -> Unit,
+    onSurface: Color,
+    chipBg: Color
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(chipBg)
+                .clickable { open = true }
+                .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
+        ) {
+            Text(text = value, fontSize = 13.sp, color = onSurface)
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = onSurface)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(label(option)) },
+                    onClick = {
+                        open = false
+                        onSelected(option)
+                    }
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun SectionHeader(text: String, color: Color) {

@@ -17,6 +17,7 @@ class LayoutModeTest {
     fun `api names match what desktop Rnote writes`() {
         assertEquals("fixed_size", LayoutMode.FIXED_SIZE.apiName)
         assertEquals("continuous_vertical", LayoutMode.CONTINUOUS_VERTICAL.apiName)
+        assertEquals("semi_infinite", LayoutMode.SEMI_INFINITE.apiName)
         assertEquals("infinite", LayoutMode.INFINITE.apiName)
     }
 
@@ -31,8 +32,13 @@ class LayoutModeTest {
     }
 
     @Test
-    fun `Rnote's semi-infinite layout maps to the unbounded mode`() {
-        assertSame(LayoutMode.INFINITE, LayoutMode.fromApiName("semi_infinite"))
+    fun `Rnote's semi-infinite layout keeps its own mode`() {
+        assertSame(LayoutMode.SEMI_INFINITE, LayoutMode.fromApiName("semi_infinite"))
+    }
+
+    @Test
+    fun `older Rnote's endless_vertical name reads as continuous vertical`() {
+        assertSame(LayoutMode.CONTINUOUS_VERTICAL, LayoutMode.fromApiName("endless_vertical"))
     }
 
     @Test

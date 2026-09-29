@@ -112,4 +112,58 @@ class EraserHitTestTest {
         assertFalse(hits(Offset(100f, 100f), 4f, s).isEmpty())
         assertTrue(hits(Offset(190f, 10f), 4f, s).isEmpty())
     }
+
+    // ── Split eraser ──────────────────────────────────────────────────────────
+
+    private fun split(center: Offset, eraserWidth: Float, s: Stroke) =
+        EraserHitTest.splitStroke(EraserHitTest.eraserBounds(center, eraserWidth), s)
+
+    @Test
+    fun `the split eraser cuts a stroke in two and keeps both ends`() {
+        val s = stroke(*(0..10).map { it * 10f to 0f }.toTypedArray(), width = 1f)
+        val pieces = split(Offset(50f, 0f), 4f, s)!!
+        assertEquals(2, pieces.size)
+        // Segments 4 (40-50) and 5 (50-60) are cut out, with the point between them.
+        assertEquals(listOf(0f, 10f, 20f, 30f, 40f), pieces[0].points.map { it.x })
+        assertEquals(listOf(60f, 70f, 80f, 90f, 100f), pieces[1].points.map { it.x })
+        // The start keeps the stroke's identity; the rest are new strokes of the same style.
+        assertEquals(s.id, pieces[0].id)
+        assertTrue(pieces[1].id != s.id)
+        assertEquals(s.strokeWidth, pieces[1].strokeWidth, 0f)
+        assertEquals(s.color, pieces[1].color)
+    }
+
+    @Test
+    fun `cutting the start leaves only the rest`() {
+        val s = stroke(*(0..5).map { it * 10f to 0f }.toTypedArray(), width = 1f)
+        val pieces = split(Offset(0f, 0f), 4f, s)!!
+        assertEquals(1, pieces.size)
+        assertEquals(listOf(10f, 20f, 30f, 40f, 50f), pieces[0].points.map { it.x })
+    }
+
+    @Test
+    fun `a stroke the split eraser misses is left alone`() {
+        val s = stroke(0f to 0f, 100f to 0f, width = 1f)
+        assertEquals(null, split(Offset(50f, 50f), 4f, s))
+    }
+
+    @Test
+    fun `a stroke with nothing left worth keeping goes entirely`() {
+        val s = stroke(0f to 0f, 10f to 0f, 20f to 0f, width = 1f)
+        assertEquals(emptyList<Stroke>(), split(Offset(10f, 0f), 40f, s))
+        val dot = stroke(5f to 5f)
+        assertEquals(emptyList<Stroke>(), split(Offset(5f, 5f), 4f, dot))
+    }
+
+    @Test
+    fun `leftovers of a single segment between two cuts are dropped, as in Rnote`() {
+        // Cuts at segments 1 and 3 leave only segment 2 between them: Rnote needs two
+        // segments to make a piece there (one's end becomes the start of the next).
+        val s = stroke(*(0..6).map { it * 100f to 0f }.toTypedArray(), width = 1f)
+        val bounds1 = EraserHitTest.eraserBounds(Offset(150f, 0f), 4f)
+        val first = EraserHitTest.splitStroke(bounds1, s)!!
+        assertEquals(2, first.size)
+        assertEquals(listOf(0f, 100f), first[0].points.map { it.x })
+        assertEquals(listOf(200f, 300f, 400f, 500f, 600f), first[1].points.map { it.x })
+    }
 }

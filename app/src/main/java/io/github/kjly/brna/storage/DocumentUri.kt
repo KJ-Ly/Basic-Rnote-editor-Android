@@ -3,6 +3,7 @@ package io.github.kjly.brna.storage
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 
 /**
@@ -22,6 +23,22 @@ object DocumentUri {
             }
     } catch (e: Exception) {
         e.printStackTrace()
+        null
+    }
+
+    /**
+     * When the provider last saw the file change, in ms since the epoch; null when it
+     * won't say (not every provider keeps the column, and an "Open with" uri from another
+     * app often isn't a document uri at all). Compared before a save to notice that the
+     * file was changed elsewhere — on the laptop, through Drive — since it was opened.
+     */
+    fun lastModified(context: Context, uri: Uri): Long? = try {
+        context.contentResolver
+            .query(uri, arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0).takeIf { it > 0L } else null
+            }
+    } catch (e: Exception) {
         null
     }
 
