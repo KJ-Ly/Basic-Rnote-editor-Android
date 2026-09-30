@@ -57,7 +57,10 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   justified, as Rnote aligns text. A note's text in a font Android doesn't have
   (Cantarell, say) can be drawn in it: "Fonts…" in the ⋮ menu loads a `.ttf`, `.otf` or
   `.ttc` file under the family name the note asks for, read from the file itself. Only
-  how the text is drawn changes; the note's own font name is kept as it is.
+  how the text is drawn changes; the note's own font name is kept as it is. The font
+  size and (once a font is loaded) the font family are set for the selection, or for the
+  whole box with none; a round handle at the box's top-left corner moves it, one on its
+  right edge sets the width the text wraps at.
 - **Eraser**: Trash Strokes and Split Strokes modes. Like Rnote's, it erases ink
   and shapes and leaves text and images alone.
 - **Selector**, for ink and for desktop text, shapes and images alike, in
