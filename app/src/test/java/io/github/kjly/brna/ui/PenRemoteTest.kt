@@ -12,6 +12,7 @@ class PenRemoteTest {
     fun `the pen's own presses count`() {
         assertTrue(PenRemote.isFromPen("S Pen", 12, typingKeyboard = false))
         assertTrue(PenRemote.isFromPen("sec_e-pen", 5, typingKeyboard = false))
+        assertTrue(PenRemote.isFromPen("S Pen Pro", 6, typingKeyboard = false))
         // Put in by Samsung's S Pen service rather than sent by a device.
         assertTrue(PenRemote.isFromPen("Virtual", KeyCharacterMap.VIRTUAL_KEYBOARD, typingKeyboard = false))
         assertTrue(PenRemote.isFromPen(null, 0, typingKeyboard = false))
@@ -22,6 +23,9 @@ class PenRemoteTest {
         assertFalse(PenRemote.isFromPen("Logitech K380", 9, typingKeyboard = true))
         assertFalse(PenRemote.isFromPen("Logitech R400", 10, typingKeyboard = false))
         assertFalse(PenRemote.isFromPen("WH-1000XM4", 11, typingKeyboard = false))
+        // "Pen" inside another word is no pen: headphones called OpenRun.
+        assertFalse(PenRemote.isFromPen("OpenRun by Shokz", 14, typingKeyboard = false))
+        assertFalse(PenRemote.isFromPen("Happening Remote", 15, typingKeyboard = false))
         // Whatever it is called, a typing keyboard is not the pen.
         assertFalse(PenRemote.isFromPen("Pen & Keyboard Combo", 13, typingKeyboard = true))
     }

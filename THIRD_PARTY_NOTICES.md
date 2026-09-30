@@ -18,8 +18,12 @@ Undo/Redo (`edit-{undo,redo}-symbolic.svg`), Stroke/Fill color pads and the
 more-colors button (`stroke-color`, `fill-color`, `preferences-color-symbolic.svg`),
 brush styles (`pen-brush-style-{marker,solid,textured}-symbolic.svg`), eraser
 modes (`pen-eraser-{trash,split}-colliding-strokes-symbolic.svg`), the
-selector polygon mode (`pen-selector-polygon-symbolic.svg`), and selection
-actions (`selection-{select-all,deselect-all,duplicate,trash,invert-color,resize-lock-aspectratio}-symbolic.svg`).
+selector polygon mode (`pen-selector-polygon-symbolic.svg`), the Tools pen's
+Offset Camera, Zoom and Laser (`pen-tools-{offsetcameratool,zoomtool,laser}-symbolic.svg`),
+and selection actions
+(`selection-{select-all,deselect-all,duplicate,trash,invert-color,resize-lock-aspectratio}-symbolic.svg`).
+The Offset Camera tool's cursor in `DrawingCanvas.kt` is its `CURSOR_PATH`, from
+`crates/rnote-engine/src/pens/tools/offsetcamera.rs`.
 Several of the source SVGs (stroke-color, fill-color, pen-brush-style-*)
 contain a decorative background dot-texture pattern alongside the real glyph;
 only the real glyph's path(s) were extracted (see `GeneratedIcons.kt`'s KDoc

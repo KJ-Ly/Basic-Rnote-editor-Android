@@ -12,6 +12,7 @@ import android.print.PrintManager
 import android.provider.DocumentsContract
 import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -22,6 +23,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
@@ -39,10 +42,15 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -51,15 +59,23 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -88,6 +104,7 @@ import io.github.kjly.brna.export.ShareTarget
 import io.github.kjly.brna.model.BrushStyle
 import io.github.kjly.brna.model.FixedPages
 import io.github.kjly.brna.model.LayoutMode
+import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.NativeBitmapElement
 import io.github.kjly.brna.model.NativeBrushStroke
 import io.github.kjly.brna.model.NativeCanvasElement
@@ -101,22 +118,29 @@ import io.github.kjly.brna.model.PenFavorite
 import io.github.kjly.brna.model.brushFavorite
 import io.github.kjly.brna.model.withFavorite
 import io.github.kjly.brna.model.Stroke
+import io.github.kjly.brna.model.TabletLayout
 import io.github.kjly.brna.model.TextAlignment
+import io.github.kjly.brna.model.TextDefaults
 import io.github.kjly.brna.model.TextFormatting
 import io.github.kjly.brna.model.TextToggle
 import io.github.kjly.brna.model.ToolConfig
 import io.github.kjly.brna.model.ToolType
+import io.github.kjly.brna.model.PenMode
+import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenShortcutState
 import io.github.kjly.brna.model.ShortcutKey
 import io.github.kjly.brna.model.UndoHistory
 import io.github.kjly.brna.model.ViewportState
 import io.github.kjly.brna.model.SnapPositions
 import io.github.kjly.brna.render.NativeElementRenderer
+import io.github.kjly.brna.storage.Backups
 import io.github.kjly.brna.storage.ContentHash
+import io.github.kjly.brna.storage.CustomFonts
 import io.github.kjly.brna.storage.DocumentUri
 import io.github.kjly.brna.storage.FileManager
 import io.github.kjly.brna.storage.FolderBrowser
 import io.github.kjly.brna.storage.FolderListing
+import io.github.kjly.brna.storage.FontNameReader
 import io.github.kjly.brna.storage.ImageImport
 import io.github.kjly.brna.storage.NativeEditing
 import io.github.kjly.brna.storage.PdfImporter
@@ -127,7 +151,10 @@ import io.github.kjly.brna.storage.SettingsManager
 import io.github.kjly.brna.storage.Workspaces
 import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -137,20 +164,29 @@ import io.github.kjly.brna.ui.KeyboardShortcuts
 import io.github.kjly.brna.ui.PenRemote
 import io.github.kjly.brna.ui.Shortcut
 import io.github.kjly.brna.ui.canvas.SelectionManager
+import io.github.kjly.brna.ui.canvas.StylusButtons
 import io.github.kjly.brna.ui.components.ColorPicker
 import io.github.kjly.brna.ui.components.ExportSheet
+import io.github.kjly.brna.ui.components.FontManagerDialog
+import io.github.kjly.brna.ui.components.NameFontDialog
 import io.github.kjly.brna.ui.components.PageSettingsSheet
+import io.github.kjly.brna.storage.PdfImportPrefs
+import io.github.kjly.brna.storage.PdfPageLayout
+import io.github.kjly.brna.ui.components.PdfImportDialog
 import io.github.kjly.brna.ui.components.PenConfigStrip
 import io.github.kjly.brna.ui.components.PenPicker
+import io.github.kjly.brna.ui.components.ProtectedNoteBanner
 import io.github.kjly.brna.ui.components.RnoteTopBar
 import io.github.kjly.brna.ui.components.PageOverviewDialog
 import io.github.kjly.brna.ui.components.RecentFilesDialog
+import io.github.kjly.brna.ui.components.RestoreVersionDialog
 import io.github.kjly.brna.ui.components.InlineTextEditor
 import io.github.kjly.brna.ui.components.NoteTab
 import io.github.kjly.brna.ui.components.NoteTabBar
 import io.github.kjly.brna.ui.components.TextBoxStyle
 import io.github.kjly.brna.ui.components.WorkspaceBrowser
 import io.github.kjly.brna.ui.theme.BabyRnoteTheme
+import io.github.kjly.brna.ui.theme.BrnaColors
 
 /**
  * One undo step: the ink and the desktop elements together, so undoing a Clear Canvas
@@ -175,7 +211,8 @@ private data class ParkedTab(
     val uri: Uri?,
     val knownLastModified: Long?,
     val saveAsRnote: Boolean,
-    val knownContentHash: String? = null
+    val knownContentHash: String? = null,
+    val protectedFrom: String? = null
 )
 
 /** Copied ink and desktop elements. */
@@ -200,7 +237,20 @@ private class Clip(val strokes: List<Stroke>, val natives: List<NativeCanvasElem
  */
 private object SelectionClipboard {
     var clip by mutableStateOf<Clip?>(null)
+
+    /**
+     * When Android's clipboard was last set as the selection was copied here. Still the
+     * same at a paste — the picture of the selection didn't make it there — the copy made
+     * here is the newer one, and it is what is pasted.
+     */
+    var systemClipAtCopy: Long? = null
 }
+
+/** The label of the picture of a selection this app puts on Android's clipboard (see copySelectionImage). */
+private const val OWN_CLIP_LABEL = "Basic Rnote selection"
+
+/** What can be pasted or dropped from another app: what [MainActivity.takeInFile] and a text box take. */
+private val TAKEABLE_TYPES = arrayOf("image/*", "application/pdf", "application/x-xopp", "application/octet-stream", "text/*")
 
 /** Width of a page picture in the page overview, in px. */
 private const val THUMBNAIL_WIDTH_PX = 320
@@ -210,6 +260,9 @@ private const val PASTE_OFFSET = 20f
 
 /** How far in from the view's corner an inserted image lands, in document units at 100%. */
 private const val IMPORT_OFFSET = 32f
+
+/** How narrow the right-edge handle may squeeze a text box's wrap width, so a line still fits a word or two. */
+private const val MIN_TEXT_BOX_WIDTH = 60f
 
 /** How long a shared file is kept for the app it went to, in ms. */
 private const val SHARED_FILE_LIFETIME_MS = 60 * 60 * 1000L
@@ -234,7 +287,14 @@ private data class TextSession(
     val value: TextFieldValue,
     val pending: Map<TextToggle, Boolean> = emptyMap(),
     /** Whether this box's undo step is on the stack yet: one per box, however much is typed. */
-    val undoTaken: Boolean = false
+    val undoTaken: Boolean = false,
+    /**
+     * The wrap width set by dragging the box's right-edge handle before it has an
+     * element yet (nothing typed into it so far) — there is no box in the document to
+     * carry it otherwise. Once [element] exists the handle sets its `max_width`
+     * directly instead, same as every other box property, and this goes back to null.
+     */
+    val widthOverride: Float? = null
 )
 
 class MainActivity : ComponentActivity() {
@@ -288,11 +348,22 @@ class MainActivity : ComponentActivity() {
     /** Notes recovered from the last session, one per tab they were in, waiting to be offered back. */
     private var pendingRecovery by mutableStateOf<List<Recovery.Pending>>(emptyList())
 
-    /** Set when [incomingDocument] is the open note reloaded from its file. */
+    /** Set when [incomingDocument] is the open note reloaded from its file, or an earlier version of it restored. */
     private var incomingKeepsView = false
 
-    /** Set when [incomingDocument] is a Xournal++ file made into a note: new, and not yet saved anywhere. */
+    /**
+     * Set when [incomingDocument] is unsaved: a Xournal++ file made into a note, not yet saved
+     * anywhere, or an earlier version of the note restored, not yet back in its file.
+     */
     private var incomingUnsaved = false
+
+    /**
+     * The Rnote version the open note's file came from, when that is newer than this app
+     * knows the format of (see [RnoteVersion]); null otherwise. Such a file is shown but
+     * never written back over — the note has no file of its own, as an imported one hasn't,
+     * so autosave keeps only the recovery copy and Save asks where to put a copy.
+     */
+    private var protectedFrom by mutableStateOf<String?>(null)
 
     // ── Tabs ──────────────────────────────────────────────────────────────────
 
@@ -374,14 +445,34 @@ class MainActivity : ComponentActivity() {
         CreateDocumentNear("application/octet-stream")
     ) { uri -> uri?.let { finishSaveAs(it, asRnote = true) } }
 
-    /** Where imported PDF pages go: page width, format height, and the top of the first. */
-    private class PdfImportTarget(val pageWidth: Float, val formatHeight: Float, val startY: Float)
+    /**
+     * Where imported PDF pages go: the note's format, and Rnote's insert position — the
+     * top left of the view, [PdfPageLayout.IMPORT_OFFSET] into it, and not before the
+     * document's origin.
+     */
+    private class PdfImportTarget(
+        val formatWidth: Float,
+        val formatHeight: Float,
+        val insertX: Float,
+        val insertY: Float
+    )
 
-    /** Installed by the UI, which knows the note's format and where its content ends. */
+    /** Installed by the UI, which knows the note's format and the view. */
     private var pdfImportTarget: (() -> PdfImportTarget)? = null
 
-    /** Installed by the UI: adds imported pages to the open note. */
-    private var onPdfImported: ((List<NativeVectorImageElement>) -> Unit)? = null
+    /** Installed by the UI: adds imported pages to the open note; true when the document is adjusted to them. */
+    private var onPdfImported: ((List<NativeVectorImageElement>, Boolean) -> Unit)? = null
+
+    /** A PDF picked for import, waiting in Rnote's import dialog: its name and every page's size. */
+    private class PendingPdfImport(
+        val uri: Uri,
+        val fileName: String,
+        val pageSizes: List<Pair<Float, Float>>,
+        /** Where it was dropped, in document units; null for Rnote's usual place in the view. */
+        val at: Offset?
+    )
+
+    private var pendingPdfImport by mutableStateOf<PendingPdfImport?>(null)
 
     private val importPdfLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -393,9 +484,96 @@ class MainActivity : ComponentActivity() {
     ) { uri -> uri?.let { importFile(it) } }
 
     private fun importFile(uri: Uri) {
-        val type = contentResolver.getType(uri)
-        val name = DocumentUri.displayName(this, uri).orEmpty().lowercase()
-        if (type == "application/pdf" || name.endsWith(".pdf")) importPdf(uri) else insertImage(uri)
+        if (!takeInFile(uri)) insertImage(uri)
+    }
+
+    /**
+     * A file from outside — picked, pasted or dropped — taken in the way Rnote takes one in
+     * (its `open_file_w_dialogs`): a PDF through the import dialog, a picture into the note,
+     * a Xournal++ file as a new note. [at] is where it was dropped, in document units.
+     * False for a file of any other kind.
+     */
+    private fun takeInFile(uri: Uri, mime: String? = null, at: Offset? = null): Boolean {
+        val type = mime?.takeIf { it != "application/octet-stream" } ?: contentResolver.getType(uri)
+        val name = try {
+            DocumentUri.displayName(this, uri).orEmpty().lowercase()
+        } catch (e: RuntimeException) {
+            ""
+        }
+        when {
+            type == "application/pdf" || name.endsWith(".pdf") -> importPdf(uri, at)
+            type == "application/x-xopp" || name.endsWith(".xopp") -> openDocument(uri)
+            // Every picture Android can read, but not a drawing in SVG, which it can't.
+            (type?.startsWith("image/") == true && type != "image/svg+xml") ||
+                name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") -> insertImage(uri, at = at)
+            else -> return false
+        }
+        return true
+    }
+
+    /** Installed by the UI: text pasted or dropped, into the box being typed into or a new one at [Offset]. */
+    private var onTakeText: ((String, Offset?) -> Unit)? = null
+
+    /** Whether Android's clipboard holds something from another app to paste. */
+    private var systemClipAvailable by mutableStateOf(false)
+
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { refreshSystemClip() }
+
+    private fun refreshSystemClip() {
+        val description = try {
+            getSystemService(ClipboardManager::class.java)?.primaryClipDescription
+        } catch (e: RuntimeException) {
+            null
+        }
+        systemClipAvailable = description != null && description.label?.toString() != OWN_CLIP_LABEL &&
+            TAKEABLE_TYPES.any { description.hasMimeType(it) }
+    }
+
+    /**
+     * What a paste takes from another app, or null when the app's own copy is what to paste:
+     * the clipboard holds the picture of it, or has not changed since it was made.
+     */
+    private fun externalClip(): ClipData? {
+        val clipboard = getSystemService(ClipboardManager::class.java) ?: return null
+        return try {
+            val description = clipboard.primaryClipDescription ?: return null
+            if (description.label?.toString() == OWN_CLIP_LABEL) return null
+            if (SelectionClipboard.clip != null && description.timestamp == SelectionClipboard.systemClipAtCopy) return null
+            clipboard.primaryClip
+        } catch (e: RuntimeException) {
+            null
+        }
+    }
+
+    /**
+     * Rnote's `clipboard_paste` for what another app put there: a file (a picture, a PDF, a
+     * Xournal++ file) taken in as [takeInFile] does, else its text as a text box. False when
+     * there was nothing to take.
+     */
+    private fun pasteExternal(clip: ClipData): Boolean {
+        if (clip.itemCount == 0) return false
+        val item = clip.getItemAt(0)
+        item.uri?.let { uri -> return takeInFile(uri, clip.description.getMimeType(0)) }
+        val text = item.coerceToText(this).toString().takeIf { it.isNotBlank() } ?: return false
+        onTakeText?.invoke(text, null)
+        return true
+    }
+
+    /**
+     * Something dragged from another app and let go over the note at [at] (document units),
+     * as Rnote's canvas takes a drop: the first file dropped, or else the text.
+     */
+    private fun takeInDrop(event: android.view.DragEvent, at: Offset): Boolean {
+        val clip = event.clipData ?: return false
+        // Permission to read what another app's files hold, kept until the app closes.
+        requestDragAndDropPermissions(event)
+        for (i in 0 until clip.itemCount) {
+            val uri = clip.getItemAt(i).uri ?: continue
+            return takeInFile(uri, clip.description.getMimeType(0), at)
+        }
+        val text = clip.getItemAt(0).coerceToText(this).toString().takeIf { it.isNotBlank() } ?: return false
+        onTakeText?.invoke(text, at)
+        return true
     }
 
     /**
@@ -417,21 +595,51 @@ class MainActivity : ComponentActivity() {
 
     /** Installed by the UI: Rnote's Ctrl+Space button shortcut went down (true) or came up. */
     private var penShortcutKeyHandler: ((ShortcutKey, Boolean) -> Unit)? = null
+    /** The end of the stylus in a pointer event, whichever view it goes to (see PenModes). */
+    private var penModeHandler: ((PenMode) -> Unit)? = null
     private var ctrlSpaceDown = false
 
     /** Renders the PDF's pages off the main thread and adds them to the open note. */
-    private fun importPdf(uri: Uri) {
+    /** Reads the PDF's pages, then asks how to import them, as Rnote's import dialog does. */
+    private fun importPdf(uri: Uri, at: Offset? = null) {
+        if (busyMessage != null) return
+        busyMessage = "Reading PDF…"
+        lifecycleScope.launch {
+            val sizes = withContext(Dispatchers.IO) {
+                try {
+                    PdfImporter.pageSizes(this@MainActivity, uri)
+                } catch (e: Throwable) {
+                    // A password-protected or broken PDF.
+                    e.printStackTrace()
+                    null
+                }
+            }
+            busyMessage = null
+            if (sizes.isNullOrEmpty()) {
+                Toast.makeText(this@MainActivity, "Could not import the PDF", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val name = DocumentUri.displayName(this@MainActivity, uri) ?: "PDF"
+            pendingPdfImport = PendingPdfImport(uri, name, sizes, at)
+        }
+    }
+
+    /** Pages [first] to [last] (from 0) of [request], placed and drawn as [prefs] say. */
+    private fun runPdfImport(request: PendingPdfImport, prefs: PdfImportPrefs, first: Int, last: Int) {
         val target = pdfImportTarget?.invoke() ?: return
         if (busyMessage != null) return
+        val placed = PdfPageLayout.place(
+            request.pageSizes, first, last, prefs,
+            target.formatWidth, target.formatHeight,
+            request.at?.x ?: target.insertX, request.at?.y ?: target.insertY
+        )
         busyMessage = "Importing PDF…"
         lifecycleScope.launch {
             val pages = withContext(Dispatchers.IO) {
                 try {
-                    PdfImporter.import(
-                        this@MainActivity, uri, target.pageWidth, target.formatHeight, target.startY
-                    )
+                    PdfImporter.import(this@MainActivity, request.uri, placed)
                 } catch (e: Throwable) {
-                    // A password-protected or broken PDF, or one too big to render.
+                    // A broken PDF, or one too big to render.
                     e.printStackTrace()
                     null
                 }
@@ -440,7 +648,7 @@ class MainActivity : ComponentActivity() {
             if (pages.isNullOrEmpty()) {
                 Toast.makeText(this@MainActivity, "Could not import the PDF", Toast.LENGTH_LONG).show()
             } else {
-                onPdfImported?.invoke(pages)
+                onPdfImported?.invoke(pages, prefs.adjustDocument)
                 Toast.makeText(
                     this@MainActivity,
                     if (pages.size == 1) "Imported 1 page" else "Imported ${pages.size} pages",
@@ -450,8 +658,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Installed by the UI: where an image of this many pixels goes in the current view. */
-    private var imagePlacement: ((Int, Int) -> NativeEditing.ImagePlacement)? = null
+    /**
+     * Installed by the UI: where an image of this many pixels goes in the current view —
+     * or, dropped, with its corner at the point given, in document units.
+     */
+    private var imagePlacement: ((Int, Int, Offset?) -> NativeEditing.ImagePlacement)? = null
 
     /** Installed by the UI: adds an inserted image to the open note. */
     private var onImageInserted: ((NativeBitmapElement) -> Unit)? = null
@@ -486,7 +697,7 @@ class MainActivity : ComponentActivity() {
      * Reads the picture off the main thread and adds it to the open note where desktop
      * Rnote would put it (see [NativeEditing.placeImage]).
      */
-    private fun insertImage(uri: Uri, isCameraPhoto: Boolean = false) {
+    private fun insertImage(uri: Uri, isCameraPhoto: Boolean = false, at: Offset? = null) {
         val place = imagePlacement ?: return
         if (busyMessage != null) return
         busyMessage = "Inserting image…"
@@ -505,7 +716,7 @@ class MainActivity : ComponentActivity() {
             }
             busyMessage = null
             val image = pixels?.let {
-                NativeEditing.createImage(it.rgbaBase64, it.width, it.height, place(it.width, it.height))
+                NativeEditing.createImage(it.rgbaBase64, it.width, it.height, place(it.width, it.height, at))
             }
             if (image == null) {
                 Toast.makeText(this@MainActivity, "Could not insert the image", Toast.LENGTH_LONG).show()
@@ -513,6 +724,92 @@ class MainActivity : ComponentActivity() {
                 onImageInserted?.invoke(image)
             }
         }
+    }
+
+    // ── Custom fonts: font files loaded from the device, standing in for a family
+    // Android's own faces don't cover — see storage.CustomFonts. ──────────────────
+    /** Registered fonts, refreshed after every import or removal. */
+    private var customFonts by mutableStateOf<List<CustomFonts.Entry>>(emptyList())
+    /** Bumped after a font is added or removed, so the canvas drops its stale text layouts. */
+    private var customFontsVersion by mutableIntStateOf(0)
+    private var showFontManager by mutableStateOf(false)
+    /** A font file just picked, waiting for the family name to register it under. */
+    private var pendingFontUri by mutableStateOf<Uri?>(null)
+    private var pendingFontSuggestedName by mutableStateOf("")
+
+    private val pickFontLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            // The file is read off the main thread: a font can be megabytes, and a provider
+            // like Drive may have to fetch it first.
+            lifecycleScope.launch {
+                val (family, fileTitle) = withContext(Dispatchers.IO) {
+                    detectFontFamily(it) to
+                        DocumentUri.titleFrom(DocumentUri.displayName(this@MainActivity, it) ?: it.lastPathSegment ?: "Font")
+                }
+                // Read the family straight out of the font file's own name table when we
+                // can; a name typed by hand only if that fails (an unsupported container,
+                // or a file that isn't really a font).
+                pendingFontSuggestedName = family ?: fileTitle
+                pendingFontUri = it
+            }
+        }
+    }
+
+    /**
+     * The family name embedded in [uri]'s own font data, or null if it can't be read —
+     * the file is larger than fonts reasonably get, isn't a font at all, or is a
+     * container FontNameReader doesn't understand. Reads the whole file into memory,
+     * which is fine for a font (typically well under a megabyte, rarely more than a
+     * few); the cap below is just a guard against reading something enormous by mistake.
+     */
+    private fun detectFontFamily(uri: Uri): String? {
+        val cap = 20 * 1024 * 1024
+        val bytes = try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(64 * 1024)
+                var total = 0
+                while (true) {
+                    val read = input.read(chunk)
+                    if (read < 0) break
+                    total += read
+                    if (total > cap) return null
+                    buffer.write(chunk, 0, read)
+                }
+                buffer.toByteArray()
+            }
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        return FontNameReader.familyName(bytes)
+    }
+
+    /** Registers the font just picked under [family], and refreshes what draws it. */
+    private fun importFont(family: String) {
+        val uri = pendingFontUri ?: return
+        pendingFontUri = null
+        lifecycleScope.launch {
+            // Copied and loaded off the main thread, like reading the name was.
+            val loaded = withContext(Dispatchers.IO) {
+                val originalName = DocumentUri.displayName(this@MainActivity, uri) ?: pendingFontSuggestedName
+                CustomFonts.import(this@MainActivity, uri, family, originalName)
+                    ?.let { CustomFonts.load(this@MainActivity) }
+            }
+            if (loaded == null) {
+                Toast.makeText(this@MainActivity, "Could not load that as a font", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            customFonts = loaded
+            customFontsVersion++
+        }
+    }
+
+    private fun removeFont(entry: CustomFonts.Entry) {
+        CustomFonts.remove(this, entry)
+        customFonts = CustomFonts.load(this)
+        customFontsVersion++
     }
 
     private val openDocumentLauncher = registerForActivityResult(
@@ -580,6 +877,15 @@ class MainActivity : ComponentActivity() {
                     knownLastModified = null
                     knownContentHash = null
                     incomingUnsaved = true
+                } else if (loaded.newerRnote != null) {
+                    // From an Rnote newer than this app knows the format of: shown, and kept
+                    // among the recent notes, but never saved over — see protectedFrom.
+                    DocumentUri.takePersistablePermission(this@MainActivity, uri)
+                    RecentFiles.add(this@MainActivity, uri, title)
+                    currentDocumentUri = null
+                    pickerStartUri = uri
+                    knownLastModified = null
+                    knownContentHash = null
                 } else {
                     adoptDocumentUri(uri, title)
                     // Set here on the main thread together with incomingDocument, never earlier:
@@ -588,6 +894,7 @@ class MainActivity : ComponentActivity() {
                     knownLastModified = lastModified
                     knownContentHash = loaded.contentHash
                 }
+                protectedFrom = loaded.newerRnote
                 incomingKeepsView = reload
                 incomingDocument = loaded.document.copy(title = title)
                 Toast.makeText(
@@ -596,6 +903,7 @@ class MainActivity : ComponentActivity() {
                         automatic -> "Newer version of $title loaded"
                         reload -> "Loaded their version of $title"
                         loaded.imported -> "Imported: $title — Save keeps it as an .rnote"
+                        loaded.newerRnote != null -> "Opened: $title — from Rnote ${loaded.newerRnote}, it won't be saved over"
                         else -> "Opened: $title"
                     },
                     Toast.LENGTH_SHORT
@@ -641,6 +949,60 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * "Restore Previous Version": [version], a copy [Backups] kept of the open note's file,
+     * in place of what the tab shows, the view left where it was. Unsaved, as Rnote leaves
+     * a note it opened into: it goes back into the file with the next save, and until then
+     * the file is as it was. The note is saved first, and what the file holds then is kept
+     * too, so the version it held before the restore can be brought back the same way.
+     */
+    private fun restoreVersion(version: Backups.Version) {
+        val uri = currentDocumentUri ?: return
+        if (busyMessage != null) return
+        val slot = activeTab
+        lifecycleScope.launch {
+            if (!autosaveNow()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Save the note first — its changes couldn't be written to its file",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            if (busyMessage != null || uri != currentDocumentUri || slot != activeTab) return@launch
+            busyMessage = "Restoring…"
+            val result = withContext(Dispatchers.IO) {
+                writeLock.withLock { Backups.keepNow(this@MainActivity, uri) }
+                try {
+                    FileManager.loadDocumentFromUri(this@MainActivity, Uri.fromFile(version.file))
+                        ?.let { it to DocumentUri.displayName(this@MainActivity, uri) }
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                    null
+                }
+            }
+            busyMessage = null
+            val (loaded, fileName) = result ?: (null to null)
+            // Only what this app wrote over, so never an import or a file from a newer Rnote.
+            if (loaded == null || loaded.imported || loaded.newerRnote != null) {
+                Toast.makeText(this@MainActivity, "Could not restore that version", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            // Another note put on screen meanwhile: this one is not for it.
+            if (uri != currentDocumentUri || slot != activeTab) return@launch
+            val title = fileName?.let(DocumentUri::titleFrom) ?: loaded.document.title
+            saveAsRnote = loaded.isNativeRnote
+            incomingKeepsView = true
+            incomingUnsaved = true
+            incomingDocument = loaded.document.copy(title = title)
+            Toast.makeText(
+                this@MainActivity,
+                "Earlier version restored — the next save puts it back in the file",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     /** Writes back over the file the note came from. False when it has no file yet. */
     private fun saveInPlace(document: NoteDocument, overwriteChanges: Boolean = false): Boolean {
         val target = currentDocumentUri ?: return false
@@ -658,7 +1020,11 @@ class MainActivity : ComponentActivity() {
                     pendingConflict = document
                     return@launch
                 }
-                val written = writeLock.withLock { withContext(Dispatchers.IO) { writeDocument(target, document, asRnote) } }
+                val written = writeLock.withLock {
+                    withContext(Dispatchers.IO) {
+                        writeDocument(target, document, asRnote, knownHash, changedSince = overwriteChanges || known == null)
+                    }
+                }
                 busyMessage = null
                 if (written != null) {
                     afterSave(target, document, slot, written)
@@ -878,7 +1244,7 @@ class MainActivity : ComponentActivity() {
                     e.printStackTrace()
                 }
                 if (target != null && busyMessage == null && !changedElsewhere(target, known, knownHash)) {
-                    writeLock.withLock { writeDocument(target, document, asRnote) }
+                    writeLock.withLock { writeDocument(target, document, asRnote, knownHash, changedSince = known == null) }
                 } else {
                     null
                 }
@@ -896,9 +1262,21 @@ class MainActivity : ComponentActivity() {
     /**
      * Blocking write; call from [Dispatchers.IO]. The [ContentHash] of what was written, or
      * null on any failure, OOM included.
+     *
+     * What the file held is kept first, unless it is what this app wrote there last (see
+     * [Backups.beforeOverwrite]): [knownHash] is the fingerprint of what it held when last
+     * read or written here, and [changedSince] says it may hold something else by now —
+     * written elsewhere and about to be overwritten anyway, or with no time to tell.
      */
-    private fun writeDocument(uri: Uri, document: NoteDocument, asRnote: Boolean): String? = try {
-        FileManager.saveDocumentHashed(this, uri, document, asRnote)
+    private fun writeDocument(
+        uri: Uri,
+        document: NoteDocument,
+        asRnote: Boolean,
+        knownHash: String? = null,
+        changedSince: Boolean = true
+    ): String? = try {
+        Backups.beforeOverwrite(this, uri, knownHash, changedSince)
+        FileManager.saveDocumentHashed(this, uri, document, asRnote)?.also { Backups.written(this, uri, it) }
     } catch (e: Throwable) {
         e.printStackTrace()
         null
@@ -907,7 +1285,8 @@ class MainActivity : ComponentActivity() {
     /** Asks for a destination, then saves there and adopts it. */
     private fun launchSavePicker(document: NoteDocument) {
         pendingDocumentToSave = document
-        val safeTitle = document.title.ifBlank { "MyNote" }
+        // A note from a newer Rnote goes beside its file under a name of its own, not over it.
+        val safeTitle = document.title.ifBlank { "MyNote" }.let { if (protectedFrom != null) "$it (copy)" else it }
         if (saveAsRnote) {
             createRnoteLauncher.launch("$safeTitle.rnote")
         } else {
@@ -934,6 +1313,8 @@ class MainActivity : ComponentActivity() {
                 // saved under — otherwise the title in the bar and the file on disk disagree.
                 val savedTitle = DocumentUri.displayName(this@MainActivity, uri)?.let(DocumentUri::titleFrom)
                 adoptDocumentUri(uri, savedTitle ?: document.title)
+                // A copy of a note from a newer Rnote is this app's own file, written as it writes one.
+                protectedFrom = null
                 savedTitle?.let { onTitleAdopted?.invoke(it) }
                 afterSave(uri, document, slot, written)
                 Toast.makeText(
@@ -1130,7 +1511,7 @@ class MainActivity : ComponentActivity() {
             } ?: return@launch
             try {
                 getSystemService(ClipboardManager::class.java)
-                    ?.setPrimaryClip(ClipData.newUri(contentResolver, "Selection", uri))
+                    ?.setPrimaryClip(ClipData.newUri(contentResolver, OWN_CLIP_LABEL, uri))
             } catch (e: RuntimeException) {
                 e.printStackTrace()
             }
@@ -1148,13 +1529,20 @@ class MainActivity : ComponentActivity() {
 
     private var onDocumentLoaded: (NoteDocument) -> Unit = {}
 
+    // Compose's drag and drop target (the note taking a drop) is marked experimental.
+    @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener)
         // The first tab, which the note opened or recovered at launch may take over.
         activeTab = newTabId()
         tabOrder.add(activeTab)
         workspaces = Workspaces.load(this)
         selectedWorkspace = Workspaces.loadSelected(this)
+        // Fonts loaded in an earlier session: into memory now, so the first frame
+        // already draws with them rather than falling back until this has run.
+        CustomFonts.restore(this)
+        customFonts = CustomFonts.load(this)
         // While the app is in front: look now and then whether Toni saved the open note.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -1166,36 +1554,74 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             // Rnote's own breakpoint collapses its sidebar under 1250sp on a desktop window;
-            // here, below Material's compact/medium 600dp boundary, the floating PenConfigStrip
-            // would overlap most of the drawing area on a phone-width screen, so it's hidden
-            // rather than degraded in place, and Page Settings falls back to a modal sheet
-            // instead of a docked side panel.
-            val isCompactWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
+            // here, below Material's compact/medium boundaries (600dp wide, 480dp high) the
+            // floating PenConfigStrip would overlap most of the drawing area on a phone-width
+            // screen, or be cut off on a phone held sideways, so it's hidden rather than
+            // degraded in place, and Page Settings falls back to a modal sheet instead of a
+            // docked side panel. "Tablet Layout" in the canvas menu lifts that on such a screen,
+            // and the interface is then scaled to fit 600 x 480 dp (see TabletLayout).
+            val screenConfig = androidx.compose.ui.platform.LocalConfiguration.current
+            val screenWidthDp = screenConfig.screenWidthDp
+            val screenHeightDp = screenConfig.screenHeightDp
+            var tabletLayout by remember { mutableStateOf(SettingsManager.loadTabletLayout(this)) }
+            val isCompactLayout = TabletLayout.isCompact(screenWidthDp, screenHeightDp, tabletLayout)
 
             // ── Persistent settings — loaded once from SharedPreferences ──────────
             var paperStyle by remember {
                 mutableStateOf(SettingsManager.loadPaperStyle(this))
             }
+            // Rnote's "Stylus pen modes": the pen each end of the stylus has, and whether it is
+            // locked (see PenModes); the app starts with the tip's, as Rnote does.
+            var penModes by remember { mutableStateOf(SettingsManager.loadPenModes(this)) }
             var toolConfig by remember {
                 mutableStateOf(
                     ToolConfig(
+                        activeTool = penModes.penTool,
                         allowFingerDrawing = SettingsManager.loadAllowFingerDrawing(this),
                         snapPositions = SettingsManager.loadSnapPositions(this),
                         blockPinchZoom = SettingsManager.loadBlockPinchZoom(this),
-                        respectBorders = SettingsManager.loadRespectBorders(this)
+                        respectBorders = SettingsManager.loadRespectBorders(this),
+                        spaceLimitVerticalBorders = SettingsManager.loadSpaceLimitVertical(this),
+                        spaceLimitHorizontalBorders = SettingsManager.loadSpaceLimitHorizontal(this),
+                        // The Typewriter's size and family, as last chosen: a document usually
+                        // keeps to one, and setting them for every new box is a chore.
+                        textSize = SettingsManager.loadTextSize(this),
+                        textFamily = TextDefaults.family(SettingsManager.loadTextFamily(this)) { CustomFonts.get(it) != null }
                     )
                 )
+            }
+            LaunchedEffect(toolConfig.textSize, toolConfig.textFamily) {
+                SettingsManager.saveTextDefaults(this@MainActivity, toolConfig.textSize, toolConfig.textFamily)
             }
             // Rnote's "Pen Sounds": off by default, kept between sessions; the sounds are only
             // loaded while they are on.
             var penSoundsOn by remember { mutableStateOf(SettingsManager.loadPenSounds(this)) }
-            val penSounds = remember(penSoundsOn) { if (penSoundsOn) PenSounds(applicationContext) else null }
-            DisposableEffect(penSounds) {
-                onDispose { penSounds?.release() }
+            // Loaded off the main thread: the pencil's player prepares its recording as it is
+            // made, which is no work for the first frame to wait on.
+            val penSounds by produceState<PenSounds?>(null, penSoundsOn) {
+                if (!penSoundsOn) {
+                    value = null
+                    return@produceState
+                }
+                // Not given up halfway: a player made and then dropped would never be released.
+                val sounds = withContext(NonCancellable + Dispatchers.IO) { PenSounds(applicationContext) }
+                if (!isActive) {
+                    sounds.release()
+                    return@produceState
+                }
+                value = sounds
+                awaitDispose {
+                    value = null
+                    sounds.release()
+                }
             }
             val togglePenSounds: () -> Unit = {
                 penSoundsOn = !penSoundsOn
                 SettingsManager.savePenSounds(this@MainActivity, penSoundsOn)
+            }
+            val toggleTabletLayout: () -> Unit = {
+                tabletLayout = !tabletLayout
+                SettingsManager.saveTabletLayout(this@MainActivity, tabletLayout)
             }
             // Rnote's other canvas menu switches, kept between sessions as Rnote keeps them.
             val toggleBlockPinchZoom: () -> Unit = {
@@ -1206,6 +1632,17 @@ class MainActivity : ComponentActivity() {
                 toolConfig = toolConfig.copy(respectBorders = !toolConfig.respectBorders)
                 SettingsManager.saveRespectBorders(this@MainActivity, toolConfig.respectBorders)
             }
+            // The Vertical Space tool's two limits, on the Tools page of the pen strip.
+            val toggleSpaceLimit: (vertical: Boolean) -> Unit = { vertical ->
+                toolConfig = if (vertical) {
+                    toolConfig.copy(spaceLimitVerticalBorders = !toolConfig.spaceLimitVerticalBorders)
+                } else {
+                    toolConfig.copy(spaceLimitHorizontalBorders = !toolConfig.spaceLimitHorizontalBorders)
+                }
+                SettingsManager.saveSpaceLimits(
+                    this@MainActivity, toolConfig.spaceLimitVerticalBorders, toolConfig.spaceLimitHorizontalBorders
+                )
+            }
             /** Rnote's canvas menu toggle, and Ctrl+Shift+P. */
             val toggleSnapPositions: () -> Unit = {
                 toolConfig = toolConfig.copy(snapPositions = !toolConfig.snapPositions)
@@ -1215,6 +1652,14 @@ class MainActivity : ComponentActivity() {
             // pressing one has done to the pen (see PenShortcutState).
             var penShortcuts by remember { mutableStateOf(SettingsManager.loadPenShortcuts(this)) }
             val penShortcutState = remember { PenShortcutState() }
+            // Which end of the stylus is in use; only a stylus changes it, as in Rnote.
+            var penMode by remember { mutableStateOf(PenMode.PEN) }
+            val setPenModes: (PenModes) -> Unit = { modes ->
+                if (modes != penModes) {
+                    penModes = modes
+                    SettingsManager.savePenModes(this@MainActivity, modes)
+                }
+            }
             // Rnote's Focus Mode: the pen picker, the colour picker and the pen settings put
             // away, leaving the page and the headerbar. Neither is kept once the app closes,
             // in Rnote as here.
@@ -1275,6 +1720,7 @@ class MainActivity : ComponentActivity() {
             var canvasTop by remember { mutableFloatStateOf(0f) }
             var textSessionCount by remember { mutableIntStateOf(0) }
             var showRecent by remember { mutableStateOf(false) }
+            var showRestore by remember { mutableStateOf(false) }
             var showFiles by remember { mutableStateOf(false) }
             var showPages by remember { mutableStateOf(false) }
             val snapshot = { DocSnapshot(strokes.toList(), documentNativeElements) }
@@ -1394,7 +1840,8 @@ class MainActivity : ComponentActivity() {
                     onDocumentLoaded(pendingDocument)
                     incomingDocument = null
                     if (incomingUnsaved) {
-                        // Imported, not yet anywhere: unsaved, as Rnote marks it.
+                        // Imported, not yet anywhere, or restored, not yet in the file:
+                        // unsaved, as Rnote marks it.
                         incomingUnsaved = false
                         isModified = true
                     }
@@ -1431,6 +1878,7 @@ class MainActivity : ComponentActivity() {
                 currentDocumentUri = null
                 knownLastModified = null
                 knownContentHash = null
+                protectedFrom = null
             }
 
             // ── Tabs ──────────────────────────────────────────────────────────────
@@ -1449,7 +1897,8 @@ class MainActivity : ComponentActivity() {
                     uri = currentDocumentUri,
                     knownLastModified = knownLastModified,
                     saveAsRnote = saveAsRnote,
-                    knownContentHash = knownContentHash
+                    knownContentHash = knownContentHash,
+                    protectedFrom = protectedFrom
                 )
             }
             val showParked: (ParkedTab) -> Unit = { tab ->
@@ -1471,6 +1920,7 @@ class MainActivity : ComponentActivity() {
                 knownLastModified = tab.knownLastModified
                 knownContentHash = tab.knownContentHash
                 saveAsRnote = tab.saveAsRnote
+                protectedFrom = tab.protectedFrom
                 isModified = tab.isModified
             }
             // An untouched new note: what a note being opened may take the place of.
@@ -1649,21 +2099,28 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch {
                     if (busyMessage != null) return@launch
                     val fileName = if (DocumentUri.isRnote(name)) name else "$name.rnote"
-                    val created = withContext(Dispatchers.IO) {
-                        val uri = FolderBrowser.createNote(this@MainActivity, tree, folderId, fileName)
-                            ?: return@withContext null
-                        // A provider may pick another name when that one is taken.
-                        val actualName = DocumentUri.displayName(this@MainActivity, uri) ?: fileName
-                        val note = NoteDocument(
-                            title = DocumentUri.titleFrom(actualName),
-                            paperStyle = SettingsManager.loadPaperStyle(this@MainActivity)
-                        )
-                        if (FileManager.saveDocumentHashed(this@MainActivity, uri, note, asRnote = true) != null) {
-                            uri
-                        } else {
-                            FolderBrowser.delete(this@MainActivity, uri)
-                            null
+                    // Busy while the file is made, so nothing else starts meanwhile and
+                    // turns the opening of it below away.
+                    busyMessage = "Creating the note…"
+                    val created = try {
+                        withContext(Dispatchers.IO) {
+                            val uri = FolderBrowser.createNote(this@MainActivity, tree, folderId, fileName)
+                                ?: return@withContext null
+                            // A provider may pick another name when that one is taken.
+                            val actualName = DocumentUri.displayName(this@MainActivity, uri) ?: fileName
+                            val note = NoteDocument(
+                                title = DocumentUri.titleFrom(actualName),
+                                paperStyle = SettingsManager.loadPaperStyle(this@MainActivity)
+                            )
+                            if (FileManager.saveDocumentHashed(this@MainActivity, uri, note, asRnote = true) != null) {
+                                uri
+                            } else {
+                                FolderBrowser.delete(this@MainActivity, uri)
+                                null
+                            }
                         }
+                    } finally {
+                        busyMessage = null
                     }
                     if (created == null) {
                         Toast.makeText(this@MainActivity, "Could not create the note there", Toast.LENGTH_LONG).show()
@@ -1723,37 +2180,60 @@ class MainActivity : ComponentActivity() {
             pdfImportTarget = {
                 val pageW = paperStyle.effectivePageWidthPx.takeIf { it > 0f } ?: 793.7f
                 val pageH = paperStyle.effectivePageHeightPx.takeIf { it > 0f } ?: 1122.5f
-                val others = documentNativeElements.filter { it !is NativeBrushStroke }
-                val hasContent = strokes.isNotEmpty() || others.isNotEmpty()
-                // Below everything already in the note, starting on the next whole page.
-                val bottom = maxOf(
-                    strokes.maxOfOrNull { s -> s.points.maxOfOrNull { it.y } ?: 0f } ?: 0f,
-                    others.maxOfOrNull { it.maxY } ?: 0f
+                // Rnote's `determine_stroke_import_pos`: into the view by the import offset,
+                // but not before the document's origin, which only an infinite one goes past.
+                val corner = viewportState.screenToCanvas(
+                    androidx.compose.ui.geometry.Offset(PdfPageLayout.IMPORT_OFFSET, PdfPageLayout.IMPORT_OFFSET)
                 )
-                val startY = if (hasContent) (floor(bottom / pageH) + 1f) * pageH else 0f
-                PdfImportTarget(pageW, pageH, startY)
+                val infinite = paperStyle.layoutMode == LayoutMode.INFINITE
+                PdfImportTarget(
+                    pageW, pageH,
+                    if (infinite) corner.x else corner.x.coerceAtLeast(0f),
+                    if (infinite) corner.y else corner.y.coerceAtLeast(0f)
+                )
             }
-            onPdfImported = { pages ->
+            onPdfImported = { pages, adjust ->
                 // Ahead of the rest: the document layer is drawn first, under everything.
                 pushUndo()
                 redoStack.clear()
                 documentNativeElements = pages + documentNativeElements
+                if (adjust) {
+                    // Rnote's "Adjust Document": the format the largest page, Fixed Size.
+                    val w = pages.maxOf { it.maxX - it.minX }
+                    val h = pages.maxOf { it.maxY - it.minY }
+                    paperStyle = paperStyle.copy(
+                        pageSize = PageSize.CUSTOM,
+                        isLandscape = w > h,
+                        customWidthPx = minOf(w, h),
+                        customHeightPx = maxOf(w, h),
+                        layoutMode = LayoutMode.FIXED_SIZE
+                    )
+                }
                 isModified = true
                 // A Fixed Size document gets the pages the PDF needs, as in Rnote.
                 fitPagesToContent()
-                // Bring the first imported page into view at the current zoom.
-                viewportState = viewportState.copy(
-                    panOffset = androidx.compose.ui.geometry.Offset(
-                        ViewportState.ORIGIN_MARGIN_PX,
-                        ViewportState.ORIGIN_MARGIN_PX - pages.first().minY * viewportState.effectiveScale
+                if (adjust) {
+                    // The pages start at the origin: bring it into view.
+                    viewportState = viewportState.copy(
+                        panOffset = androidx.compose.ui.geometry.Offset(ViewportState.ORIGIN_MARGIN_PX, ViewportState.ORIGIN_MARGIN_PX)
                     )
-                )
+                } else {
+                    // Selected, as Rnote leaves them, to be moved where they should go.
+                    penShortcutState.picked()
+                    toolConfig = toolConfig.copy(activeTool = ToolType.SELECTOR)
+                    selectedStrokes.clear()
+                    selectedNatives.clear()
+                    selectedNatives.addAll(pages)
+                }
             }
 
             // ── Inserted images ───────────────────────────────────────────────────
             val hasCamera = remember { packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
-            imagePlacement = { width, height ->
-                val topLeft = viewportState.screenToCanvas(Offset.Zero)
+            imagePlacement = { width, height, at ->
+                // Rnote's `Stroke::IMPORT_OFFSET_DEFAULT`: 32 px on its screen, which is
+                // 32 document units at 100%. A drop puts the corner where it was let go.
+                val offset = IMPORT_OFFSET / viewportState.zoomScale
+                val topLeft = at?.let { it - Offset(offset, offset) } ?: viewportState.screenToCanvas(Offset.Zero)
                 val bottomRight = viewportState.screenToCanvas(
                     Offset(canvasSize.width.toFloat(), canvasSize.height.toFloat())
                 )
@@ -1762,9 +2242,7 @@ class MainActivity : ComponentActivity() {
                 NativeEditing.placeImage(
                     width, height,
                     topLeft.x, topLeft.y, bottomRight.x, bottomRight.y,
-                    // Rnote's `Stroke::IMPORT_OFFSET_DEFAULT`: 32 px on its screen, which is
-                    // 32 document units at 100%.
-                    offset = IMPORT_OFFSET / viewportState.zoomScale,
+                    offset = offset,
                     fixedPageWidth = paperStyle.effectivePageWidthPx.takeIf { fixedWidth && it > 0f },
                     clampToOrigin = layout != LayoutMode.INFINITE,
                     borders = if (toolConfig.respectBorders) {
@@ -1826,8 +2304,9 @@ class MainActivity : ComponentActivity() {
                     NativeEditing.createText(
                         value.text, session.x, session.y, toolConfig.textSize,
                         RnoteNativeColor(c.red, c.green, c.blue, c.alpha),
-                        NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx),
-                        toolConfig.textAlignment.apiName
+                        session.widthOverride ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx),
+                        toolConfig.textAlignment.apiName,
+                        toolConfig.textFamily
                     )
                 }
                 if (edited == null && session.element == null) {
@@ -1849,7 +2328,49 @@ class MainActivity : ComponentActivity() {
                 }
                 putText(session.element, edited)
                 isModified = true
-                textSession = session.copy(element = edited, template = edited ?: base, value = value, undoTaken = true)
+                textSession = session.copy(
+                    element = edited, template = edited ?: base, value = value, undoTaken = true,
+                    // The box now carries its own width; the handle sets it there from now on.
+                    widthOverride = if (edited != null) null else session.widthOverride
+                )
+            }
+            // Rnote's `insert_text`: into the box being typed into, at its cursor; else a new box
+            // in the Typewriter's style, where it was dropped or 32 into the view, typed on from
+            // its end.
+            onTakeText = take@{ text, at ->
+                val session = textSession
+                if (session != null) {
+                    val v = session.value
+                    val typed = v.text.replaceRange(v.selection.min, v.selection.max, text)
+                    onTextChange(TextFieldValue(typed, TextRange(v.selection.min + text.length)))
+                    return@take
+                }
+                // Rnote's `determine_stroke_import_pos`: where it was dropped, or into the view
+                // but not before the document's origin, which only an infinite one goes past.
+                val corner = at ?: (viewportState.screenToCanvas(Offset.Zero) + Offset(IMPORT_OFFSET, IMPORT_OFFSET)).let {
+                    if (paperStyle.layoutMode == LayoutMode.INFINITE) it else Offset(maxOf(it.x, 0f), maxOf(it.y, 0f))
+                }
+                val c = toolConfig.penColor
+                val box = NativeEditing.createText(
+                    text, corner.x, corner.y, toolConfig.textSize,
+                    RnoteNativeColor(c.red, c.green, c.blue, c.alpha),
+                    NativeEditing.typewriterWrapWidth(corner.x, paperStyle.effectivePageWidthPx),
+                    toolConfig.textAlignment.apiName,
+                    toolConfig.textFamily
+                ) ?: return@take
+                pushUndo()
+                redoStack.clear()
+                documentNativeElements = documentNativeElements + box
+                isModified = true
+                penShortcutState.picked()
+                toolConfig = toolConfig.copy(activeTool = ToolType.TYPEWRITER)
+                selectedStrokes.clear()
+                selectedNatives.clear()
+                textSessionCount++
+                textSession = TextSession(
+                    textSessionCount, corner.x, corner.y, box, box,
+                    TextFieldValue(text, TextRange(text.length)), undoTaken = true
+                )
             }
             /** Bold, italic, underline or strikethrough: on the selection, or else for what is typed next. */
             val onToggleTextFormat: (TextToggle) -> Unit = { toggle ->
@@ -1901,6 +2422,116 @@ class MainActivity : ComponentActivity() {
                 val there = TextFormatting.togglesAt(session.element, selection.min, selection.max)
                 TextToggle.entries.filterTo(mutableSetOf()) { session.pending[it] ?: (it in there) }
             } ?: emptySet()
+
+            /**
+             * The Typewriter's font size, set directly on the box being typed into, the way the
+             * bold/italic switches do rather than only queuing it for the next character
+             * (there is no keyboard shortcut toggling size the way Ctrl+B does, so there is
+             * nothing to keep "pending" for): on the selection if there is one, else on the
+             * whole box. It is also the size of the next new box.
+             */
+            val onTextFontSizeChanged: (Float) -> Unit = { newSize ->
+                toolConfig = toolConfig.updateActiveSize(newSize)
+                val session = textSession
+                val element = session?.element
+                if (session != null && element != null) {
+                    if (!session.undoTaken) {
+                        pushUndo()
+                        redoStack.clear()
+                    }
+                    val selection = session.value.selection
+                    val updated = if (selection.collapsed) {
+                        NativeEditing.withBoxFontSize(element, newSize)
+                    } else {
+                        NativeEditing.withFontSize(element, selection.min, selection.max, newSize)
+                    }
+                    putText(element, updated)
+                    isModified = true
+                    textSession = session.copy(element = updated, template = updated, undoTaken = true)
+                }
+            }
+            /** What the size chip shows: the selection's own if it all agrees, else the default for text typed next. */
+            val textFontSize: Float = textSession?.let { session ->
+                val selection = session.value.selection
+                TextFormatting.sizeAt(session.element, selection.min, selection.max)
+            } ?: toolConfig.textSize
+            /** The Typewriter's font family: on the selection if there is one, else on the whole box; also the next new box's. */
+            val onTextFontFamilySelected: (String) -> Unit = { family ->
+                toolConfig = toolConfig.copy(textFamily = family)
+                val session = textSession
+                val element = session?.element
+                if (session != null && element != null) {
+                    if (!session.undoTaken) {
+                        pushUndo()
+                        redoStack.clear()
+                    }
+                    val selection = session.value.selection
+                    val updated = if (selection.collapsed) {
+                        NativeEditing.withBoxFontFamily(element, family)
+                    } else {
+                        NativeEditing.withFontFamily(element, selection.min, selection.max, family)
+                    }
+                    putText(element, updated)
+                    isModified = true
+                    textSession = session.copy(element = updated, template = updated, undoTaken = true)
+                }
+            }
+            /** What the font button shows: the selection's own if it all agrees, else the default for text typed next. */
+            val textFamily: String = textSession?.let { session ->
+                val selection = session.value.selection
+                TextFormatting.familyAt(session.element, selection.min, selection.max)
+            } ?: toolConfig.textFamily
+
+            /**
+             * The box's top-left handle dragged: moves the box being typed into, whether it
+             * has an element yet or is still just the tap position waiting for a first
+             * character.
+             */
+            val onMoveTextBox: (Float, Float) -> Unit = { dx, dy ->
+                val session = textSession
+                if (session != null) {
+                    val element = session.element
+                    if (element != null) {
+                        if (!session.undoTaken) {
+                            pushUndo()
+                            redoStack.clear()
+                        }
+                        val moved = NativeEditing.translate(element, dx, dy) as NativeTextElement
+                        putText(element, moved)
+                        isModified = true
+                        textSession = session.copy(x = session.x + dx, y = session.y + dy, element = moved, template = moved, undoTaken = true)
+                    } else {
+                        textSession = session.copy(x = session.x + dx, y = session.y + dy)
+                    }
+                }
+            }
+            /**
+             * The box's right-edge handle dragged: the wrap width it reflows text at,
+             * grown or shrunk by [dx] — never its height, which always just follows from
+             * how the text then wraps. Applied to the element directly once there is one
+             * (session.widthOverride otherwise; see TextSession).
+             */
+            val onResizeTextBoxWidth: (Float) -> Unit = { dx ->
+                val session = textSession
+                if (session != null) {
+                    val element = session.element
+                    if (element != null) {
+                        val current = element.maxWidth ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
+                        val newWidth = (current + dx).coerceAtLeast(MIN_TEXT_BOX_WIDTH)
+                        if (!session.undoTaken) {
+                            pushUndo()
+                            redoStack.clear()
+                        }
+                        val updated = NativeEditing.withMaxWidth(element, newWidth)
+                        putText(element, updated)
+                        isModified = true
+                        textSession = session.copy(element = updated, template = updated, undoTaken = true)
+                    } else {
+                        val current = session.widthOverride ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
+                        textSession = session.copy(widthOverride = (current + dx).coerceAtLeast(MIN_TEXT_BOX_WIDTH))
+                    }
+                }
+            }
 
             // ── Share ─────────────────────────────────────────────────────────────
             val shareNote: (ShareTarget) -> Unit = { target ->
@@ -2017,6 +2648,46 @@ class MainActivity : ComponentActivity() {
                 penShortcutState.picked()
                 switchTool(newTool)
             }
+            // The end of the stylus in use keeps the pen it has — not a button's temporary
+            // one — however it was picked, as each of Rnote's pen modes keeps its style.
+            val penModeTool = penShortcutState.underlying ?: toolConfig.activeTool
+            LaunchedEffect(penModeTool, penMode) { setPenModes(penModes.withTool(penMode, penModeTool)) }
+            /**
+             * The stylus's other end came into use: Rnote's `change_pen_mode`. The end put
+             * down keeps its pen, the one taken up brings its own out, and a button's
+             * temporary pen goes, as Rnote takes every override off.
+             */
+            penModeHandler = { mode ->
+                if (mode != penMode) {
+                    setPenModes(penModes.withTool(penMode, penShortcutState.underlying ?: toolConfig.activeTool))
+                    penMode = mode
+                    penShortcutState.picked()
+                    switchTool(penModes.tool(mode))
+                }
+            }
+            // Rnote's "Tool Locked" toast, one at a time, with its button to unlock the end in use.
+            val snackbarHostState = remember { SnackbarHostState() }
+            val snackbarScope = rememberCoroutineScope()
+            /** A pen picked in the pen picker: Rnote's `set_pen_style_with_lock`. */
+            val pickTool: (ToolType) -> Unit = { newTool ->
+                when (penModes.pick(penMode, newTool, toolConfig.activeTool)) {
+                    PenModes.Pick.SWITCH -> selectTool(newTool)
+                    PenModes.Pick.NOTHING -> Unit
+                    PenModes.Pick.LOCKED -> snackbarScope.launch {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        val result = snackbarHostState.showSnackbar(
+                            "Tool Locked", actionLabel = "Unlock", duration = SnackbarDuration.Short
+                        )
+                        if (result == SnackbarResult.ActionPerformed) setPenModes(penModes.withLock(penMode, false))
+                    }
+                }
+            }
+            /** Rnote's "Stylus pen modes" rows: the end in use takes its new pen at once. */
+            val changePenModes: (PenModes) -> Unit = { modes ->
+                val before = penModes.tool(penMode)
+                setPenModes(modes)
+                if (modes.tool(penMode) != before) selectTool(modes.tool(penMode))
+            }
             /**
              * Whether a temporary pen from a button still has something on the go, as Rnote's
              * pen reports it has not finished: a selection held, a text box open.
@@ -2046,21 +2717,68 @@ class MainActivity : ComponentActivity() {
             }
             // Which of the colour picker's two pads the palette sets; Rnote's starts on the stroke.
             var fillPadActive by remember { mutableStateOf(false) }
+            // Rnote's camera bounds for the layout (see ViewportState.boundsFor). What is on a
+            // Continuous Vertical document is measured only when it is one, and only again
+            // when it changes, not as the view moves.
+            val continuousContentHeight by remember {
+                derivedStateOf {
+                    if (paperStyle.layoutMode != LayoutMode.CONTINUOUS_VERTICAL) {
+                        0f
+                    } else {
+                        ExportLayout.contentBounds(strokes, documentNativeElements)
+                            ?.let { maxOf(it.bottom, 0f) - minOf(it.top, 0f) } ?: 0f
+                    }
+                }
+            }
+            val viewBounds = ViewportState.boundsFor(
+                paperStyle.layoutMode,
+                if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageWidthPx,
+                if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageHeightPx,
+                paperStyle.fixedPages,
+                continuousContentHeight
+            )
+            /**
+             * The view moved by hand — dragged, pinched, zoomed — kept to the document as
+             * Rnote's camera keeps it (see ViewportState.clampedTo).
+             */
+            val moveView: (ViewportState) -> Unit = { moved ->
+                viewportState = moved.clampedTo(viewBounds, canvasSize.width.toFloat(), canvasSize.height.toFloat())
+            }
+            // And again when the view or the document changes size, as Rnote's canvas does.
+            LaunchedEffect(viewBounds, canvasSize) { moveView(viewportState) }
             /** Zoomed by [factor] about the middle of the view, as Rnote's zoom keys do. */
             val zoomBy: (Float) -> Unit = { factor ->
                 val middle = Offset(canvasSize.width / 2f, canvasSize.height / 2f)
-                viewportState = viewportState.zoomedAround(middle, viewportState.zoomScale * factor)
+                moveView(viewportState.zoomedAround(middle, viewportState.zoomScale * factor))
             }
             val zoomFitWidth: () -> Unit = {
-                viewportState = viewportState.fittedToWidth(
-                    canvasSize.width.toFloat(),
-                    canvasSize.height.toFloat(),
-                    if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageWidthPx
+                moveView(
+                    viewportState.fittedToWidth(
+                        canvasSize.width.toFloat(),
+                        canvasSize.height.toFloat(),
+                        if (paperStyle.pageSize.isInfinite) 0f else paperStyle.effectivePageWidthPx
+                    )
+                )
+            }
+            val zoomRealSize: () -> Unit = {
+                moveView(
+                    viewportState.zoomedToRealSize(
+                        canvasSize.width.toFloat(), canvasSize.height.toFloat(), paperStyle.dpi
+                    )
                 )
             }
 
+            // With the tablet layout on a small screen, everything is drawn smaller so that 600 x
+            // 480 dp of it fit; dp, sp and text follow, pixel work (the canvas, touch) does not.
+            val baseDensity = LocalDensity.current
+            val layoutScale = TabletLayout.scale(screenWidthDp, screenHeightDp, tabletLayout)
+            val layoutDensity = remember(baseDensity, layoutScale) {
+                if (layoutScale == 1f) baseDensity else Density(baseDensity.density * layoutScale, baseDensity.fontScale)
+            }
+            CompositionLocalProvider(LocalDensity provides layoutDensity) {
             BabyRnoteTheme(darkTheme = paperStyle.isDarkMode) {
                 Scaffold(
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
                     topBar = {
                         Column {
                             RnoteTopBar(
@@ -2070,15 +2788,17 @@ class MainActivity : ComponentActivity() {
                                 isModified = isModified,
                                 documentTitle = documentTitle,
                                 currentPage = pageGridLabel,
-                                onResetZoom = { viewportState = ViewportState(displayScale = displayScale) },
+                                onResetZoom = { moveView(ViewportState(displayScale = displayScale)) },
                                 // Unlike the zoom reset next to it, this keeps the zoom and
                                 // only moves the view — see ViewportState.returnedToOrigin.
                                 onReturnToOrigin = {
-                                    viewportState = viewportState.returnedToOrigin(
-                                        viewportWidthPx = canvasSize.width.toFloat(),
-                                        // Nothing to centre on when the document has no pages.
-                                        pageWidthPx = if (paperStyle.pageSize.isInfinite) 0f
-                                                      else paperStyle.effectivePageWidthPx
+                                    moveView(
+                                        viewportState.returnedToOrigin(
+                                            viewportWidthPx = canvasSize.width.toFloat(),
+                                            // Nothing to centre on when the document has no pages.
+                                            pageWidthPx = if (paperStyle.pageSize.isInfinite) 0f
+                                                          else paperStyle.effectivePageWidthPx
+                                        )
                                     )
                                 },
                                 onTitleTap = {
@@ -2109,6 +2829,8 @@ class MainActivity : ComponentActivity() {
                                 hasSelection = selectedStrokes.isNotEmpty() || selectedNatives.isNotEmpty(),
                                 onShare = shareNote,
                                 onShowRecent = { showRecent = true },
+                                canRestoreVersion = currentDocumentUri != null && protectedFrom == null,
+                                onRestoreVersion = { showRestore = true },
                                 onShowPages = { showPages = true },
                                 onNewDocument = newDocument,
                                 onExport = { showExportSheet = true },
@@ -2122,11 +2844,15 @@ class MainActivity : ComponentActivity() {
                                 onToggleRespectBorders = toggleRespectBorders,
                                 penSounds = penSoundsOn,
                                 onTogglePenSounds = togglePenSounds,
+                                showTabletLayout = TabletLayout.isNarrow(screenWidthDp, screenHeightDp),
+                                tabletLayout = tabletLayout,
+                                onToggleTabletLayout = toggleTabletLayout,
                                 blockPinchZoom = toolConfig.blockPinchZoom,
                                 onToggleBlockPinchZoom = toggleBlockPinchZoom,
                                 onZoomOut = { zoomBy(1f / (1f + ViewportState.ZOOM_STEP)) },
                                 onZoomIn = { zoomBy(1f + ViewportState.ZOOM_STEP) },
                                 onZoomFitWidth = zoomFitWidth,
+                                onZoomRealSize = zoomRealSize,
                                 isFixedSize = paperStyle.layoutMode == LayoutMode.FIXED_SIZE,
                                 canRemovePage = paperStyle.fixedPages > 1,
                                 onAddPage = addPage,
@@ -2135,7 +2861,8 @@ class MainActivity : ComponentActivity() {
                                 focusMode = focusMode,
                                 onToggleFocusMode = { focusMode = !focusMode },
                                 fullscreen = fullscreen,
-                                onToggleFullscreen = { fullscreen = !fullscreen }
+                                onToggleFullscreen = { fullscreen = !fullscreen },
+                                onManageFonts = { showFontManager = true }
                             )
                             // Desktop Rnote's tab bar: there once more than one note is open.
                             if (tabOrder.size > 1) {
@@ -2153,18 +2880,45 @@ class MainActivity : ComponentActivity() {
                                     onNew = newDocument
                                 )
                             }
+                            protectedFrom?.let { version ->
+                                ProtectedNoteBanner(
+                                    version = version,
+                                    darkTheme = paperStyle.isDarkMode,
+                                    onSaveCopy = saveDocumentAs
+                                )
+                            }
                         }
                     }
                 ) { innerPadding ->
+                    // Rnote's drop target: a file or text dragged from another app and let go over
+                    // the note comes in where it was let go.
+                    val dropTarget = remember {
+                        object : DragAndDropTarget {
+                            override fun onDrop(event: DragAndDropEvent): Boolean {
+                                val drag = event.toAndroidDragEvent()
+                                val at = viewportState.screenToCanvas(Offset(drag.x, drag.y - canvasTop))
+                                return takeInDrop(drag, at)
+                            }
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
                             .onSizeChanged { canvasSize = it }
                             .onGloballyPositioned { canvasTop = it.positionInRoot().y }
+                            .dragAndDropTarget(
+                                shouldStartDragAndDrop = { event ->
+                                    val description = event.toAndroidDragEvent().clipDescription
+                                    description != null && TAKEABLE_TYPES.any { description.hasMimeType(it) }
+                                },
+                                target = dropTarget
+                            )
                     ) {
                         DrawingCanvas(
                             toolConfig = toolConfig,
+                            penMode = penMode,
+                            penModes = penModes,
                             onShortcutKey = onShortcutKey,
                             onPenGestureEnd = {
                                 penShortcutState.gestureEnded(shortcutPenBusy())?.let(switchTool)
@@ -2173,9 +2927,7 @@ class MainActivity : ComponentActivity() {
                             viewportState = viewportState,
                             strokes = strokes,
                             selectedStrokes = selectedStrokes,
-                            onViewportChanged = { newViewport ->
-                                viewportState = newViewport
-                            },
+                            onViewportChanged = moveView,
                             onAddStroke = { newStroke ->
                                 pushUndo()
                                 redoStack.clear()
@@ -2277,6 +3029,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 isModified = true
                             },
+                            customFontsVersion = customFontsVersion,
                         )
 
                         // The Typewriter's text field, over the box being typed into.
@@ -2291,10 +3044,10 @@ class MainActivity : ComponentActivity() {
                                     value = session.value,
                                     onValueChange = onTextChange,
                                     style = box?.let { TextBoxStyle.of(it) } ?: TextBoxStyle(
-                                        NativeEditing.TEXT_FONT_FAMILY, toolConfig.textSize, 500, false,
+                                        toolConfig.textFamily, toolConfig.textSize, 500, false,
                                         toolConfig.penColor.let { RnoteNativeColor(it.red, it.green, it.blue, it.alpha) },
                                         toolConfig.textAlignment.apiName,
-                                        NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
+                                        session.widthOverride ?: NativeEditing.typewriterWrapWidth(session.x, paperStyle.effectivePageWidthPx)
                                     ),
                                     runs = session.element?.let { TextFormatting.runs(it) } ?: emptyList(),
                                     topLeft = Offset(session.x, session.y),
@@ -2305,7 +3058,9 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onToggle = onToggleTextFormat,
                                     onDone = { textSession = null },
-                                    onCursorKey = { penSounds?.cursorKey() }
+                                    onCursorKey = { penSounds?.cursorKey() },
+                                    onMove = onMoveTextBox,
+                                    onResizeWidth = onResizeTextBoxWidth
                                 )
                             }
                         }
@@ -2371,24 +3126,28 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // A color picked for the stroke or the fill, by a swatch or a key (1 to 9).
+                        val pickStrokeColor: (Color) -> Unit = { newColor ->
+                            toolConfig = if (toolConfig.activeTool == ToolType.BRUSH && toolConfig.brushStyle == BrushStyle.MARKER) {
+                                toolConfig.copy(highlighterColor = newColor)
+                            } else {
+                                toolConfig.copy(penColor = newColor)
+                            }
+                            recolorSelection(newColor, false)
+                        }
+                        val pickFillColor: (Color) -> Unit = { newColor ->
+                            toolConfig = toolConfig.copy(fillColor = newColor)
+                            recolorSelection(newColor, true)
+                        }
+
                         // Top-center: stroke and fill color + palette (matches Rnote's colorpicker.ui)
                         if (!focusMode) ColorPicker(
                             activeColor = toolConfig.currentActiveColor,
-                            onColorSelected = { newColor ->
-                                toolConfig = if (toolConfig.activeTool == ToolType.BRUSH && toolConfig.brushStyle == BrushStyle.MARKER) {
-                                    toolConfig.copy(highlighterColor = newColor)
-                                } else {
-                                    toolConfig.copy(penColor = newColor)
-                                }
-                                recolorSelection(newColor, false)
-                            },
+                            onColorSelected = pickStrokeColor,
                             fillColor = toolConfig.fillColor,
                             fillPadActive = fillPadActive,
                             onPadSelected = { fill -> fillPadActive = fill },
-                            onFillColorSelected = { newColor ->
-                                toolConfig = toolConfig.copy(fillColor = newColor)
-                                recolorSelection(newColor, true)
-                            },
+                            onFillColorSelected = pickFillColor,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .padding(top = 18.dp)
@@ -2412,6 +3171,11 @@ class MainActivity : ComponentActivity() {
                         val copySelection: () -> Unit = {
                             if (selectedStrokes.isNotEmpty() || selectedNatives.isNotEmpty()) {
                                 SelectionClipboard.clip = Clip(selectedStrokes.toList(), selectedNatives.toList())
+                                SelectionClipboard.systemClipAtCopy = try {
+                                    getSystemService(ClipboardManager::class.java)?.primaryClipDescription?.timestamp
+                                } catch (e: RuntimeException) {
+                                    null
+                                }
                                 // And for other apps, as a picture of it.
                                 copySelectionImage(
                                     NoteDocument(
@@ -2436,13 +3200,19 @@ class MainActivity : ComponentActivity() {
                             )
                             val inView = box[2] >= viewTopLeft.x && box[0] <= viewBottomRight.x &&
                                 box[3] >= viewTopLeft.y && box[1] <= viewBottomRight.y
-                            val dx: Float
-                            val dy: Float
+                            var dx: Float
+                            var dy: Float
                             if (inView || canvasSize.width == 0) {
                                 dx = PASTE_OFFSET; dy = PASTE_OFFSET
                             } else {
                                 dx = (viewTopLeft.x + viewBottomRight.x) / 2f - (box[0] + box[2]) / 2f
                                 dy = (viewTopLeft.y + viewBottomRight.y) / 2f - (box[1] + box[3]) / 2f
+                            }
+                            // Not before the document's origin, which only an infinite one goes
+                            // past, as Rnote places what it pastes.
+                            if (paperStyle.layoutMode != LayoutMode.INFINITE) {
+                                dx = maxOf(dx, -box[0])
+                                dy = maxOf(dy, -box[1])
                             }
                             pushUndo()
                             redoStack.clear()
@@ -2460,6 +3230,18 @@ class MainActivity : ComponentActivity() {
                             // Pasting again cascades from here, as a second duplicate would.
                             SelectionClipboard.clip = Clip(newStrokes, newNatives)
                             isModified = true
+                        }
+                        /**
+                         * Rnote's paste: what another app put on the clipboard since the last
+                         * copy here, else the copy made here, which comes in selected.
+                         */
+                        val paste: () -> Unit = paste@{
+                            val external = externalClip()
+                            if (external != null && pasteExternal(external)) return@paste
+                            if (SelectionClipboard.clip != null) {
+                                selectTool(ToolType.SELECTOR)
+                                pasteClipboard()
+                            }
                         }
 
                         val duplicateSelection: () -> Unit = {
@@ -2522,10 +3304,8 @@ class MainActivity : ComponentActivity() {
                                     return@handler false
                                 }
                                 Shortcut.PASTE -> {
-                                    if (SelectionClipboard.clip == null) return@handler false
-                                    // What is pasted comes in selected, so the selector has to be out.
-                                    selectTool(ToolType.SELECTOR)
-                                    pasteClipboard()
+                                    if (SelectionClipboard.clip == null && !systemClipAvailable) return@handler false
+                                    paste()
                                 }
                                 Shortcut.SELECT_ALL -> {
                                     selectTool(ToolType.SELECTOR)
@@ -2543,13 +3323,19 @@ class MainActivity : ComponentActivity() {
                                 Shortcut.ERASER -> selectTool(ToolType.ERASER)
                                 Shortcut.SELECTOR -> selectTool(ToolType.SELECTOR)
                                 Shortcut.TOOLS -> selectTool(ToolType.TOOLS)
+                                // As a swatch in the color bar is clicked: into the pad that is active.
+                                Shortcut.COLOR_1, Shortcut.COLOR_2, Shortcut.COLOR_3, Shortcut.COLOR_4, Shortcut.COLOR_5,
+                                Shortcut.COLOR_6, Shortcut.COLOR_7, Shortcut.COLOR_8, Shortcut.COLOR_9 -> {
+                                    val color = BrnaColors.PenPalette.getOrNull(shortcut.colorSlot ?: -1) ?: return@handler false
+                                    if (fillPadActive) pickFillColor(color) else pickStrokeColor(color)
+                                }
                             }
                             true
                         }
 
                         // Left edge, vertically centered: per-pen config (matches RnPensSideBar).
-                        // Hidden below the width breakpoint (see isCompactWidth, top of file).
-                        if (!isCompactWidth && !focusMode) PenConfigStrip(
+                        // Hidden on a screen too small for it (see isCompactLayout, top of file).
+                        if (!isCompactLayout && !focusMode) PenConfigStrip(
                             toolConfig = toolConfig,
                             hasActiveSelection = selectedStrokes.isNotEmpty() || selectedNatives.isNotEmpty(),
                             onBrushStyleSelected = { style -> toolConfig = toolConfig.copy(brushStyle = style) },
@@ -2560,18 +3346,19 @@ class MainActivity : ComponentActivity() {
                             onDeselectAll = deselectAll,
                             onShapeKindSelected = { kind -> toolConfig = toolConfig.copy(shapeKind = kind) },
                             onEraserModeSelected = { mode -> toolConfig = toolConfig.copy(eraserMode = mode) },
-                            canPaste = SelectionClipboard.clip != null,
+                            canPaste = SelectionClipboard.clip != null || systemClipAvailable,
                             onCopySelection = copySelection,
                             onCutSelection = {
                                 copySelection()
                                 deleteSelection()
                             },
-                            onPaste = pasteClipboard,
+                            onPaste = paste,
                             onLockAspectRatioToggled = {
                                 toolConfig = toolConfig.copy(lockAspectRatio = !toolConfig.lockAspectRatio)
                             },
                             onSelectorModeSelected = { mode -> toolConfig = toolConfig.copy(selectorMode = mode) },
                             onToolsModeSelected = { mode -> toolConfig = toolConfig.copy(toolsMode = mode) },
+                            onSpaceLimitToggled = toggleSpaceLimit,
                             onSnapAnglesToggled = {
                                 toolConfig = toolConfig.copy(snapAngles = !toolConfig.snapAngles)
                             },
@@ -2587,6 +3374,11 @@ class MainActivity : ComponentActivity() {
                             onToggleTextFormat = onToggleTextFormat,
                             textAlignment = textAlignment,
                             onTextAlignmentSelected = onTextAlignmentSelected,
+                            textFontSize = textFontSize,
+                            onTextFontSizeChanged = onTextFontSizeChanged,
+                            textFamily = textFamily,
+                            onTextFontFamilySelected = onTextFontFamilySelected,
+                            customFonts = customFonts,
                             onPressureCurveSelected = { curve -> toolConfig = toolConfig.copy(pressureCurve = curve) },
                             onShapeLineChanged = { line -> toolConfig = toolConfig.copy(shapeLine = line) },
                             onShaperStyleSelected = { style -> toolConfig = toolConfig.copy(shaperStyle = style) },
@@ -2608,7 +3400,7 @@ class MainActivity : ComponentActivity() {
                             toolConfig = toolConfig,
                             canUndo = undoStack.isNotEmpty(),
                             canRedo = redoStack.isNotEmpty(),
-                            onToolSelected = selectTool,
+                            onToolSelected = pickTool,
                             onUndo = { performUndoAction?.invoke() },
                             onRedo = { performRedoAction?.invoke() },
                             modifier = Modifier
@@ -2641,8 +3433,10 @@ class MainActivity : ComponentActivity() {
                                     penShortcuts = it
                                     SettingsManager.savePenShortcuts(this@MainActivity, it)
                                 },
+                                penModes = penModes,
+                                onPenModesChanged = changePenModes,
                                 onDismiss = { showPageSettings = false },
-                                dockedAsSidePanel = !isCompactWidth,
+                                dockedAsSidePanel = !isCompactLayout,
                                 modifier = Modifier.align(Alignment.CenterEnd)
                             )
                         }
@@ -2762,7 +3556,7 @@ class MainActivity : ComponentActivity() {
                                 onClose = { showFiles = false },
                                 modifier = Modifier
                                     .fillMaxHeight()
-                                    .then(if (isCompactWidth) Modifier.fillMaxWidth() else Modifier.width(340.dp))
+                                    .then(if (isCompactLayout) Modifier.fillMaxWidth() else Modifier.width(340.dp))
                             )
                         }
 
@@ -2783,6 +3577,20 @@ class MainActivity : ComponentActivity() {
                     }
 
                     // ── Export Sheet ──────────────────────────────────────────────
+                    pendingPdfImport?.let { request ->
+                        PdfImportDialog(
+                            fileName = request.fileName,
+                            pageCount = request.pageSizes.size,
+                            initialPrefs = SettingsManager.loadPdfImportPrefs(this@MainActivity),
+                            isDark = paperStyle.isDarkMode,
+                            onDismiss = { pendingPdfImport = null },
+                            onImport = { prefs, first, last ->
+                                pendingPdfImport = null
+                                SettingsManager.savePdfImportPrefs(this@MainActivity, prefs)
+                                runPdfImport(request, prefs, first, last)
+                            }
+                        )
+                    }
                     if (showExportSheet) {
                         val exportDocument = NoteDocument(
                             title = documentTitle,
@@ -2824,6 +3632,66 @@ class MainActivity : ComponentActivity() {
                                 openRecent(Uri.parse(entry.uri))
                             },
                             onDismiss = { showRecent = false }
+                        )
+                    }
+
+                    // ── Fonts: files loaded to stand in for a family Android doesn't have ──
+                    if (showFontManager) {
+                        // Families this note's text boxes ask for that nothing loaded covers —
+                        // a hint, computed from the runs the same way NativeElementRenderer
+                        // resolves them, not from fontFamily alone (a ranged attribute can
+                        // switch family mid-box).
+                        val missingFamilies = remember(documentNativeElements, customFonts) {
+                            documentNativeElements
+                                .filterIsInstance<NativeTextElement>()
+                                .flatMap { el -> TextFormatting.runs(el).map { it.family } }
+                                .distinct()
+                                .filter { family ->
+                                    CustomFonts.get(family) == null &&
+                                        family.lowercase() !in setOf("serif", "sans-serif", "sans_serif", "monospace", "mono", "cursive")
+                                }
+                        }
+                        FontManagerDialog(
+                            fonts = customFonts,
+                            missingFamilies = missingFamilies,
+                            onPickFile = {
+                                pickFontLauncher.launch(
+                                    arrayOf(
+                                        "font/ttf", "font/otf", "font/collection",
+                                        "application/x-font-ttf", "application/x-font-otf", "application/octet-stream"
+                                    )
+                                )
+                            },
+                            onRemove = { removeFont(it) },
+                            onDismiss = { showFontManager = false }
+                        )
+                    }
+                    pendingFontUri?.let {
+                        NameFontDialog(
+                            suggestedFamily = pendingFontSuggestedName,
+                            onConfirm = { family -> importFont(family) },
+                            onDismiss = { pendingFontUri = null }
+                        )
+                    }
+
+                    // ── Versions kept of the note's file ─────────────────────────
+                    if (showRestore) {
+                        val uri = currentDocumentUri
+                        var versions by remember { mutableStateOf<List<Backups.Version>?>(null) }
+                        LaunchedEffect(uri) {
+                            versions = if (uri == null) {
+                                emptyList()
+                            } else {
+                                withContext(Dispatchers.IO) { Backups.versions(this@MainActivity, uri) }
+                            }
+                        }
+                        RestoreVersionDialog(
+                            versions = versions,
+                            onRestore = { version ->
+                                showRestore = false
+                                restoreVersion(version)
+                            },
+                            onDismiss = { showRestore = false }
                         )
                     }
 
@@ -3005,19 +3873,58 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            }
         }
         // "Open with" — only for the launch that brought the file, not when the activity
         // is recreated with the same intent after the process was reclaimed.
         if (savedInstanceState == null) {
-            if (intent?.action == Intent.ACTION_VIEW) handleViewIntent(intent) else offerRecovery()
+            val opening = intent?.action == Intent.ACTION_VIEW
+            if (opening) handleViewIntent(intent)
+            offerRecovery(afterOpening = opening)
+            sweepBackups()
         }
     }
 
-    /** Looks for notes the last session didn't get to save, and offers them back. */
-    private fun offerRecovery() {
+    /**
+     * Looks for notes the last session didn't get to save, and offers them back. When the
+     * launch is "Open with", the file it brought is opened first, and what is offered
+     * comes after it: a recovered note may only go into a tab of its own, so one of that
+     * very file is not offered here — a second copy would save over the first — but left
+     * for the next start from the launcher, as it was before this was offered at all.
+     */
+    private fun offerRecovery(afterOpening: Boolean = false) {
         lifecycleScope.launch {
-            pendingRecovery = withContext(Dispatchers.IO) { Recovery.readAll(this@MainActivity) }
+            val found = withContext(Dispatchers.IO) { Recovery.readAll(this@MainActivity) }
+            if (afterOpening) {
+                snapshotFlow { busyMessage }.first { it == null }
+                pendingRecovery = found.filter { r -> !isOpenInATab(r.uri) }
+            } else {
+                pendingRecovery = found
+            }
         }
+    }
+
+    /** Whether [uri]'s file is the one in a tab, the one on screen or another. */
+    private fun isOpenInATab(uri: Uri?): Boolean =
+        FolderBrowser.sameDocument(uri, currentDocumentUri) ||
+            parkedTabs.values.any { FolderBrowser.sameDocument(uri, it.uri) }
+
+    /** Lets go of kept versions past their week (see [Backups]). */
+    private fun sweepBackups() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            writeLock.withLock { Backups.sweep(this@MainActivity) }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Only an app with the focus may look at the clipboard; what it holds may be new.
+        if (hasFocus) refreshSystemClip()
+    }
+
+    override fun onDestroy() {
+        getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener)
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -3047,6 +3954,26 @@ class MainActivity : ComponentActivity() {
 
         /** What Rnote's "Import" takes that this app can: PDFs and pictures. */
         val IMPORTABLE_TYPES = arrayOf("application/pdf", "image/png", "image/jpeg")
+    }
+
+    /**
+     * Rnote's pen modes: the stylus's tip or its eraser end, as it touches or hovers over
+     * anything — the page, and the pen picker, which Rnote watches for this too, so that a
+     * pen picked with the eraser end is that end's.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        notePenMode(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        notePenMode(ev)
+        return super.dispatchGenericMotionEvent(ev)
+    }
+
+    private fun notePenMode(ev: MotionEvent) {
+        if (ev.pointerCount == 0) return
+        StylusButtons.penModeOf(ev.getToolType(0))?.let { penModeHandler?.invoke(it) }
     }
 
     /**

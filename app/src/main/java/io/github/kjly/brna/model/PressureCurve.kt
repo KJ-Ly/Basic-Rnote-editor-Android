@@ -32,6 +32,21 @@ enum class PressureCurve(val apiName: String) {
         }
     }
 
+    /**
+     * Rnote's `PressureCurve::apply` exactly as it computes it, in doubles and without
+     * clamping, for where the numbers have to come out as Rnote's do: the Textured
+     * brush's dots and the widths written to Xournal++.
+     */
+    fun apply(width: Double, pressure: Double): Double = when (this) {
+        CONST  -> width
+        LINEAR -> width * pressure
+        SQRT   -> width * kotlin.math.sqrt(pressure)
+        CBRT   -> width * Math.cbrt(pressure)
+        // `powi(2)` and `powi(3)`: the pressure multiplied out first, then the width.
+        POW2   -> width * (pressure * pressure)
+        POW3   -> width * (pressure * pressure * pressure)
+    }
+
     companion object {
         /** Rnote's `#[default]` variant, used when the field is absent or unrecognised. */
         val DEFAULT = LINEAR

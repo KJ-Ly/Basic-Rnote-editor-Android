@@ -114,4 +114,31 @@ data class PaperStyle(
     /** The pages of a Fixed Size document: [fixedPageCount], and never fewer than one. */
     val fixedPages: Int
         get() = fixedPageCount.coerceAtLeast(1)
+
+    /**
+     * A custom page [widthPx] wide and [heightPx] high, as Rnote's format takes a size: its
+     * orientation is whichever the size makes it, and the two custom sides are kept short
+     * one first, as a file is read (see FileManager), so [effectivePageWidthPx] is the width.
+     */
+    fun withCustomPageSize(widthPx: Float, heightPx: Float): PaperStyle = copy(
+        pageSize = PageSize.CUSTOM,
+        isLandscape = widthPx > heightPx,
+        customWidthPx = minOf(widthPx, heightPx),
+        customHeightPx = maxOf(widthPx, heightPx)
+    )
+
+    /**
+     * The page made a custom size, as Rnote's "Custom" preset leaves its format: the size it
+     * has now, to be changed from there. A page of no size — a note without pages, or a
+     * custom size never set — starts at an A3 page, a new Rnote document's.
+     */
+    fun customSized(): PaperStyle {
+        val w = effectivePageWidthPx
+        val h = effectivePageHeightPx
+        return if (w > 0f && h > 0f) {
+            withCustomPageSize(w, h)
+        } else {
+            withCustomPageSize(PageSize.A3.widthPx, PageSize.A3.heightPx)
+        }
+    }
 }

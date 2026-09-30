@@ -54,6 +54,8 @@ import io.github.kjly.brna.model.NativeShapeElement
 import io.github.kjly.brna.model.NativeTextElement
 import io.github.kjly.brna.model.NativeVectorImageElement
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PenMode
+import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenPathBuilder
 import io.github.kjly.brna.model.RnoteNativeColor
 import io.github.kjly.brna.model.RoughStyle
@@ -105,6 +107,13 @@ private const val DETAIL_SETTLE_MS = 250L
 @Composable
 fun DrawingCanvas(
     toolConfig: ToolConfig,
+    /**
+     * The end of the stylus the app has out, and the pen each end has (see PenModes): a
+     * stylus coming down with its other end is given that end's pen straight away, before
+     * the app has switched to it.
+     */
+    penMode: PenMode = PenMode.PEN,
+    penModes: PenModes = PenModes(),
     paperStyle: PaperStyle,
     viewportState: ViewportState,
     strokes: List<Stroke>,
@@ -151,7 +160,13 @@ fun DrawingCanvas(
      */
     onShortcutKey: (ShortcutKey, Boolean) -> ToolType = { _, _ -> toolConfig.activeTool },
     /** Something drawn — by the pen, a mouse or a finger that draws — has ended. */
-    onPenGestureEnd: () -> Unit = {}
+    onPenGestureEnd: () -> Unit = {},
+    /**
+     * Bumped whenever a font is loaded or removed through CustomFonts, so a text box
+     * already laid out in whatever face it fell back to is redrawn in the newly
+     * available one, rather than keeping its stale cached layout.
+     */
+    customFontsVersion: Int = 0
 ) {
     val underlays = remember(nativeElements) { nativeElements.filter(NativeElementRenderer::isUnderlay) }
     val overlays = remember(nativeElements) { nativeElements.filter(NativeElementRenderer::isOverlay) }
@@ -159,6 +174,7 @@ fun DrawingCanvas(
     // replaces only the elements that changed.
     val nativeRenderer = remember { NativeElementRenderer() }
     LaunchedEffect(overlays) { nativeRenderer.retainOnly(overlays) }
+    LaunchedEffect(customFontsVersion) { if (customFontsVersion > 0) nativeRenderer.invalidateText() }
 
     // Pages and images are turned into bitmaps once, off the main thread, one at a time
     // (a PDF page can be megabytes of SVG). Until then a page shows as a blank sheet.
@@ -338,6 +354,10 @@ fun DrawingCanvas(
     // A vertical-space drag with the Tools pen. Only drawn shifted until the pen lifts, so
     // a long note isn't rebuilt on every frame; the document changes once, at the end.
     var spaceDrag by remember { mutableStateOf<SpaceDrag?>(null) }
+    // Rnote's Offset Camera and Zoom tools while the pen is down: the document point taken
+    // hold of, and the zoom's anchor with the view as it has got so far.
+    var cameraGrab by remember { mutableStateOf<Offset?>(null) }
+    var zoomDrag by remember { mutableStateOf<ZoomDrag?>(null) }
 
     // Rnote's eraser is `width` canvas units across, full stop — no density factor, no
     // 1.5x, no screen-space floor. Those made the tool a different physical size from
@@ -508,15 +528,19 @@ fun DrawingCanvas(
                 // handed to the app, which switches pens as that button is set to — by default
                 // the S Pen's button erases while held. Only between gestures: a button pressed
                 // while writing counts once the pen lifts, so no stroke is cut in two.
-                if (!isDrawing) syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
-                // The pen's eraser end erases, whatever the buttons say, as Rnote's eraser mode does.
-                val eraserTipInUse = toolType == MotionEvent.TOOL_TYPE_ERASER
+                // A finger has no buttons, and its touch is no sign the pen's were let go.
+                val hasButtons = isStylus || toolType == MotionEvent.TOOL_TYPE_MOUSE
+                if (!isDrawing && hasButtons) syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
+                // The stylus's other end — its eraser end, by default the eraser, or the tip
+                // after it — with its own pen, as Rnote's pen modes have it: the app switches
+                // to that end on this same event, but the page has not seen it yet.
+                val otherEnd = StylusButtons.penModeOf(toolType)?.takeIf { it != penMode }
 
                 // Mid-gesture the latch decides; while hovering, the pen as it is now, so the
                 // cursor switches to the eraser square as soon as the button goes down.
                 val activeTool = when {
                     isDrawing -> gestureTool ?: toolConfig.activeTool
-                    eraserTipInUse -> ToolType.ERASER
+                    otherEnd != null -> penModes.tool(otherEnd)
                     else -> shortcutInput.pendingTool ?: toolConfig.activeTool
                 }
 
@@ -628,13 +652,26 @@ fun DrawingCanvas(
                             }
                         }
 
+                        if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.OFFSET_CAMERA) {
+                            cameraGrab = Offset(x, y)
+                            return@pointerInteropFilter true
+                        }
+                        if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.ZOOM) {
+                            zoomDrag = ZoomDrag(Offset(screenX, screenY), Offset(screenX, screenY), viewportState)
+                            return@pointerInteropFilter true
+                        }
                         if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.VERTICAL_SPACE) {
                             // What moves is settled here, as in Rnote: dragging back up past
                             // the line must not start picking up what was above it.
+                            // Within the page the pen went down on, if Rnote's limits say so.
+                            val area = VerticalSpace.region(
+                                x, y, paperStyle.effectivePageWidthPx, paperStyle.effectivePageHeightPx,
+                                toolConfig.spaceLimitVerticalBorders, toolConfig.spaceLimitHorizontalBorders
+                            )
                             spaceDrag = SpaceDrag(
                                 y,
-                                VerticalSpace.strokesBelow(strokes, y),
-                                VerticalSpace.nativesBelow(nativeElements, y)
+                                VerticalSpace.strokesIn(strokes, area),
+                                VerticalSpace.nativesIn(nativeElements, area)
                             )
                             return@pointerInteropFilter true
                         }
@@ -705,6 +742,18 @@ fun DrawingCanvas(
 
                     MotionEvent.ACTION_MOVE -> {
                         if (isDrawing) {
+                            cameraGrab?.let { grab ->
+                                onViewportChanged(viewportState.offsetTo(grab, Offset(screenX, screenY)))
+                                return@pointerInteropFilter true
+                            }
+                            zoomDrag?.let { zoom ->
+                                // From the view as the drag has left it: the one passed in may
+                                // not have caught up with the last step yet.
+                                val next = zoom.viewport.dragZoomed(zoom.anchor, screenY - zoom.last.y)
+                                zoomDrag = ZoomDrag(zoom.anchor, Offset(screenX, screenY), next)
+                                onViewportChanged(next)
+                                return@pointerInteropFilter true
+                            }
                             spaceDrag?.let { space ->
                                 val snapOffset: ((Float) -> Float)? = if (toolConfig.snapPositions) {
                                     { v -> snapped(Offset(x, v)).y }
@@ -860,6 +909,8 @@ fun DrawingCanvas(
 
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         val wasDrawing = isDrawing
+                        cameraGrab = null
+                        zoomDrag = null
                         spaceDrag?.let { space ->
                             spaceDrag = null
                             if (action == MotionEvent.ACTION_UP && abs(space.offset) > VerticalSpace.MIN_OFFSET) {
@@ -1022,7 +1073,7 @@ fun DrawingCanvas(
                         // A temporary pen goes once what was drawn with it is done, and a
                         // button let go while writing counts now.
                         if (wasDrawing) onPenGestureEnd()
-                        syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
+                        if (hasButtons) syncShortcutKeys(StylusButtons.keysOf(toolType, buttonState))
                         true
                     }
 
@@ -1397,10 +1448,29 @@ fun DrawingCanvas(
                 }
             }
 
+            // Rnote's Offset Camera and Zoom cursors, in its colours, a fixed size on screen:
+            // the move arrows on the point taken hold of; a dot where the zoom began and a
+            // ring where the pen is.
+            cameraGrab?.let { grab ->
+                val at = viewportState.canvasToScreen(grab)
+                withTransform({ translate(at.x - 8f, at.y - 8f) }) {
+                    drawPath(OFFSET_CAMERA_CURSOR, TOOL_CURSOR_LIGHT, style = CanvasStrokeStyle(width = 2f))
+                    drawPath(OFFSET_CAMERA_CURSOR, TOOL_CURSOR_DARK)
+                }
+            }
+            zoomDrag?.let { zoom ->
+                drawCircle(TOOL_CURSOR_LIGHT, 3.2f, zoom.anchor)
+                drawCircle(TOOL_CURSOR_DARK, 2.4f, zoom.anchor)
+                drawCircle(TOOL_CURSOR_LIGHT, 4f, zoom.last, style = CanvasStrokeStyle(width = 2f))
+                drawCircle(TOOL_CURSOR_DARK, 4f, zoom.last, style = CanvasStrokeStyle(width = 1.4f))
+            }
+
             // 8. Render the brush hover cursor (screen space). The eraser has its own
             // indicator above, drawn in canvas space because its size is a document size.
             hoverOffset?.let { hoverPos ->
                 if (toolConfig.activeTool == ToolType.TOOLS) {
+                    // Only Vertical Space has a line: the other tools draw theirs when used.
+                    if (toolConfig.toolsMode != ToolsMode.VERTICAL_SPACE) return@let
                     // Where the line would go: everything reaching below it moves.
                     drawLine(
                         color = SPACE_THRESHOLD_LINE.copy(alpha = 0.5f),
@@ -1460,6 +1530,20 @@ private const val SAMSUNG_ACTION_PEN_DOWN = 211
 private const val SAMSUNG_ACTION_PEN_UP = 212
 private const val SAMSUNG_ACTION_PEN_MOVE = 213
 
+/** Rnote's Zoom tool on the go: where it began on screen, where the pen was last, and the view it has made. */
+private class ZoomDrag(val anchor: Offset, val last: Offset, val viewport: ViewportState)
+
+/** Rnote's `OffsetCameraTool::CURSOR_PATH`, 16 px square. */
+private val OFFSET_CAMERA_CURSOR: Path by lazy {
+    androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+        "m 8 1.078125 l -3 3 h 2 v 2.929687 h -2.960938 v -2 l -3 3 l 3 3 v -2 h 2.960938 v 2.960938 h -2 l 3 3 l 3 -3 h -2 v -2.960938 h 3.054688 v 2 l 3 -3 l -3 -3 v 2 h -3.054688 v -2.929687 h 2 z m 0 0"
+    ).toPath()
+}
+
+/** The tools' cursor colours: GNOME's brights[1] and darks[3] at alpha 240, as Rnote draws them. */
+private val TOOL_CURSOR_LIGHT = Color(0xF0F6F5F4)
+private val TOOL_CURSOR_DARK = Color(0xF0241F31)
+
 /** A grid's first cell: its corner where the pen went down, and its size and direction. */
 private class GridCell(val start: Offset, val size: Offset)
 
@@ -1468,23 +1552,12 @@ private class CachedOutline(val bounds: Rect) {
     var path: Path? = null
 }
 
-/** A stroke's extent with room for its width: enough to tell whether it is in view. */
-private fun strokeBounds(stroke: Stroke): Rect {
-    val points = stroke.points
-    if (points.isEmpty()) return Rect.Zero
-    var left = points[0].x
-    var top = points[0].y
-    var right = left
-    var bottom = top
-    for (p in points) {
-        if (p.x < left) left = p.x
-        if (p.x > right) right = p.x
-        if (p.y < top) top = p.y
-        if (p.y > bottom) bottom = p.y
-    }
-    val margin = stroke.strokeWidth
-    return Rect(left - margin, top - margin, right + margin, bottom + margin)
-}
+/**
+ * A stroke's extent with room for its width: enough to tell whether it is in view. A
+ * curve's control points are in it, so a bulge that alone is on screen is still drawn.
+ */
+private fun strokeBounds(stroke: Stroke): Rect =
+    if (stroke.points.isEmpty()) Rect.Zero else EraserHitTest.strokeBounds(stroke, stroke.strokeWidth)
 
 /**
  * A shape being drawn in several strokes, as far as it has got, as Rnote's builders show

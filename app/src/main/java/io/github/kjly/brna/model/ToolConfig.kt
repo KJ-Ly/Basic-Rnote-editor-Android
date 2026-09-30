@@ -65,7 +65,8 @@ enum class SelectorMode { POLYGON, RECTANGLE, SINGLE, INTERSECTING_PATH }
  * the Laser — a red trail to point with that fades away and is never saved. Rnote's
  * other two, Offset Camera and Zoom, are what pan and pinch already do on a tablet.
  */
-enum class ToolsMode { VERTICAL_SPACE, LASER }
+/** Rnote's `ToolStyle`s for the Tools pen, in its order. */
+enum class ToolsMode { VERTICAL_SPACE, OFFSET_CAMERA, ZOOM, LASER }
 
 /**
  * Desktop Rnote's brush styles. MARKER reproduces what BRNA used to call the
@@ -144,12 +145,25 @@ data class ToolConfig(
     val selectorMode: SelectorMode = SelectorMode.POLYGON,
     val toolsMode: ToolsMode = ToolsMode.VERTICAL_SPACE,
     /**
+     * Rnote's "Limit movement to Vertical Page Borders" for the Vertical Space tool
+     * (`VerticalSpaceToolConfig`): only what is in the page column the pen went down in
+     * moves, not what lies left or right of it. Off by default, as in Rnote; kept in the settings.
+     */
+    val spaceLimitVerticalBorders: Boolean = false,
+    /**
+     * Rnote's "Limit movement to Horizontal Page Borders": only what lies between the pen
+     * and the next page border below it moves. Off by default, as in Rnote; kept in the settings.
+     */
+    val spaceLimitHorizontalBorders: Boolean = false,
+    /**
      * The colour picker's second pad: what new shapes are filled with. Transparent — no
      * fill — until one is picked, as in Rnote, whose pens start without a fill colour.
      */
     val fillColor: Color = Color.Transparent,
     /** Typewriter font size; Rnote's `TextStyle::FONT_SIZE_DEFAULT` is 32. */
     val textSize: Float = 32f,
+    /** Typewriter font family for new text; matches NativeEditing.TEXT_FONT_FAMILY. */
+    val textFamily: String = "serif",
     /** How new text is aligned; Rnote's typewriter starts at the start. */
     val textAlignment: TextAlignment = TextAlignment.START,
     /** The Shaper's constraints (1:1, level, upright …), off by default as in Rnote. */

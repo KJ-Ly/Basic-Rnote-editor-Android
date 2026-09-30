@@ -6,7 +6,6 @@ import io.github.kjly.brna.model.TexturedDistribution
 import io.github.kjly.brna.model.TexturedStyle
 import kotlin.math.PI
 import kotlin.math.atan2
-import kotlin.math.cbrt
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.sin
@@ -77,7 +76,7 @@ object TexturedDots {
                 seed = RnoteRandom.seedAdvance(seed)
                 continue
             }
-            val width = applyCurve(curve, strokeWidth.toDouble(), (prev.pressure.toDouble() + end.pressure.toDouble()) * 0.5)
+            val width = curve.apply(strokeWidth.toDouble(), (prev.pressure.toDouble() + end.pressure.toDouble()) * 0.5)
             segment(
                 prev.x.toDouble(), prev.y.toDouble(), end.x.toDouble(), end.y.toDouble(),
                 width, style.density, style.distribution, seed, each
@@ -161,16 +160,6 @@ object TexturedDots {
         // Outside the stroke — the open-ended distributions can land there — a uniform
         // sample takes its place.
         return if (sample >= start && sample < end) sample else UniformDouble(start, end).sample(rng)
-    }
-
-    /** Rnote's `PressureCurve::apply`, in doubles as Rnote computes it. */
-    private fun applyCurve(curve: PressureCurve, width: Double, pressure: Double): Double = when (curve) {
-        PressureCurve.CONST -> width
-        PressureCurve.LINEAR -> width * pressure
-        PressureCurve.SQRT -> width * sqrt(pressure)
-        PressureCurve.CBRT -> width * cbrt(pressure)
-        PressureCurve.POW2 -> width * (pressure * pressure)
-        PressureCurve.POW3 -> width * (pressure * pressure * pressure)
     }
 
     /** Rust's `f64::round`, halves away from zero, for the positive counts it is used on. */

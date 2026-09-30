@@ -118,6 +118,40 @@ class KeyboardShortcutsTest {
     }
 
     @Test
+    fun `the digits 1 to 9 pick the color picker's swatches, as in Rnote 0_15`() {
+        val colors = ('1'..'9').map { KeyboardShortcuts.of(it, KeyEvent.KEYCODE_UNKNOWN, ctrl = false, shift = false) }
+        assertEquals(
+            listOf(
+                Shortcut.COLOR_1, Shortcut.COLOR_2, Shortcut.COLOR_3, Shortcut.COLOR_4, Shortcut.COLOR_5,
+                Shortcut.COLOR_6, Shortcut.COLOR_7, Shortcut.COLOR_8, Shortcut.COLOR_9
+            ),
+            colors
+        )
+        assertEquals((0..8).toList(), colors.map { it!!.colorSlot })
+        assertNull(Shortcut.BRUSH.colorSlot)
+        // 0 is no swatch; Shift+1 on a German keyboard is a "!", which is none either.
+        assertNull(KeyboardShortcuts.of('0', KeyEvent.KEYCODE_0, ctrl = false, shift = false))
+        assertNull(KeyboardShortcuts.of('1', KeyEvent.KEYCODE_1, ctrl = false, shift = true))
+        assertNull(KeyboardShortcuts.of('1', KeyEvent.KEYCODE_1, ctrl = false, shift = false, alt = true))
+        // With Ctrl, the row's digits stay the pens.
+        assertEquals(Shortcut.BRUSH, ctrl('1'))
+        assertFalse(Shortcut.COLOR_1.repeats)
+    }
+
+    @Test
+    fun `the number pad picks colors 7 to 9 with Ctrl, its 1 to 6 staying the pens`() {
+        fun pad(n: Int, ctrl: Boolean) =
+            KeyboardShortcuts.of(null, KeyEvent.KEYCODE_NUMPAD_1 + n - 1, ctrl = ctrl, shift = false)
+        assertEquals(Shortcut.BRUSH, pad(1, ctrl = true))
+        assertEquals(Shortcut.TOOLS, pad(6, ctrl = true))
+        assertEquals(Shortcut.COLOR_7, pad(7, ctrl = true))
+        assertEquals(Shortcut.COLOR_9, pad(9, ctrl = true))
+        // Without Ctrl, a pad key does nothing here, even when Num Lock makes it type a digit.
+        assertNull(pad(3, ctrl = false))
+        assertNull(KeyboardShortcuts.of('3', KeyEvent.KEYCODE_NUMPAD_3, ctrl = false, shift = false))
+    }
+
+    @Test
     fun `F11 switches fullscreen, with no Ctrl`() {
         assertEquals(Shortcut.FULLSCREEN, KeyboardShortcuts.of(null, KeyEvent.KEYCODE_F11, ctrl = false, shift = false))
     }

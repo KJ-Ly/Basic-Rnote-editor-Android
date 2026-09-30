@@ -1,9 +1,16 @@
 package io.github.kjly.brna.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -11,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +36,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
@@ -53,6 +62,8 @@ import io.github.kjly.brna.model.TextRun
 import io.github.kjly.brna.model.TextToggle
 import io.github.kjly.brna.model.ViewportState
 import io.github.kjly.brna.render.NativeElementRenderer
+import io.github.kjly.brna.storage.CustomFonts
+import io.github.kjly.brna.ui.theme.BrnaColors
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -107,7 +118,11 @@ fun InlineTextEditor(
     onToggle: (TextToggle) -> Unit,
     onDone: () -> Unit,
     /** A key on a keyboard that only moves the cursor: Rnote's typewriter thumps for it. */
-    onCursorKey: () -> Unit = {}
+    onCursorKey: () -> Unit = {},
+    /** The top-left handle dragged: the box moved by this many document units. */
+    onMove: (dx: Float, dy: Float) -> Unit = { _, _ -> },
+    /** The right-edge handle dragged: the wrap width grown (positive) or shrunk by this many document units. */
+    onResizeWidth: (dx: Float) -> Unit = {}
 ) {
     val density = LocalDensity.current
     val pxPerUnit = viewportState.effectiveScale * style.scale
@@ -148,48 +163,106 @@ fun InlineTextEditor(
     }
 
     val outline = Color(0x993584E4)
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        textStyle = textStyle,
-        cursorBrush = SolidColor(color.copy(alpha = 1f)),
-        visualTransformation = transformation,
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-        onTextLayout = { layout = it },
-        modifier = Modifier
-            .offset { IntOffset(screen.x.roundToInt(), screen.y.roundToInt()) }
-            .then(
-                if (style.maxWidth != null && style.maxWidth > 0f) {
-                    Modifier.width(with(density) { (style.maxWidth * pxPerUnit).toDp() })
-                } else {
-                    // No wrap width: as wide as the longest line, even past the screen's edge.
-                    Modifier.wrapContentWidth(Alignment.Start, unbounded = true).widthIn(min = 2.dp)
-                }
-            )
-            // Rnote outlines the text box being typed into.
-            .drawBehind {
-                drawRect(
-                    color = outline,
-                    style = Stroke(
-                        width = 1.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))
-                    )
+    // The handles poke out past the outline, and a touch outside a parent's bounds never
+    // reaches its children. So the wrapper is bigger than the field by the handles' reach on
+    // every side (the field is padded inside it), and starts that far up and to the left.
+    val reach = with(density) { HANDLE_REACH.roundToPx() }
+    Box(modifier = Modifier.offset { IntOffset(screen.x.roundToInt() - reach, screen.y.roundToInt() - reach) }) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = textStyle,
+            cursorBrush = SolidColor(color.copy(alpha = 1f)),
+            visualTransformation = transformation,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            onTextLayout = { layout = it },
+            modifier = Modifier
+                .padding(HANDLE_REACH)
+                .then(
+                    if (style.maxWidth != null && style.maxWidth > 0f) {
+                        Modifier.width(with(density) { (style.maxWidth * pxPerUnit).toDp() })
+                    } else {
+                        // No wrap width: as wide as the longest line, even past the screen's edge.
+                        Modifier.wrapContentWidth(Alignment.Start, unbounded = true).widthIn(min = 2.dp)
+                    }
                 )
-            }
-            .focusRequester(focusRequester)
-            .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when {
-                    event.key == Key.Escape -> { onDone(); true }
-                    // Rnote's shortcuts: win.text-bold / -italic / -underline.
-                    event.isCtrlPressed && event.key == Key.B -> { onToggle(TextToggle.BOLD); true }
-                    event.isCtrlPressed && event.key == Key.I -> { onToggle(TextToggle.ITALIC); true }
-                    event.isCtrlPressed && event.key == Key.U -> { onToggle(TextToggle.UNDERLINE); true }
-                    event.key in CURSOR_KEYS -> { onCursorKey(); false }
-                    else -> false
+                // Rnote outlines the text box being typed into.
+                .drawBehind {
+                    drawRect(
+                        color = outline,
+                        style = Stroke(
+                            width = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))
+                        )
+                    )
                 }
-            }
-    )
+                .focusRequester(focusRequester)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when {
+                        event.key == Key.Escape -> { onDone(); true }
+                        // Rnote's shortcuts: win.text-bold / -italic / -underline.
+                        event.isCtrlPressed && event.key == Key.B -> { onToggle(TextToggle.BOLD); true }
+                        event.isCtrlPressed && event.key == Key.I -> { onToggle(TextToggle.ITALIC); true }
+                        event.isCtrlPressed && event.key == Key.U -> { onToggle(TextToggle.UNDERLINE); true }
+                        event.key in CURSOR_KEYS -> { onCursorKey(); false }
+                        else -> false
+                    }
+                }
+        )
+        // Top-left: drags the box around the canvas. Its dot sits just outside the outline
+        // corner so it doesn't cover the text itself and steal taps meant for the cursor.
+        TextBoxHandle(
+            modifier = Modifier.align(Alignment.TopStart),
+            onDrag = { dxPx, dyPx -> onMove(dxPx / pxPerUnit, dyPx / pxPerUnit) }
+        )
+        // Right edge, vertically centered on however tall the wrapped text ends up: drags
+        // the wrap width narrower or wider. Only the width is ever set this way — the
+        // height always follows from how the text then reflows, the same as Rnote's own.
+        TextBoxHandle(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            onDrag = { dxPx, _ -> onResizeWidth(dxPx / pxPerUnit) }
+        )
+    }
+}
+
+/** How far a handle's touch area reaches out past the box's outline (its dot, centered in it, then sits 6 dp out). */
+private val HANDLE_REACH = 22.dp
+
+/** The touch area of a handle: bigger than its dot, so a fingertip or the pen finds it. */
+private val HANDLE_TOUCH = 32.dp
+
+/** The dot drawn in a handle's touch area. */
+private val HANDLE_DOT = 18.dp
+
+/**
+ * A small round drag handle for [InlineTextEditor]'s move and resize-width affordances:
+ * a [HANDLE_DOT] circle in a [HANDLE_TOUCH] square that takes the drag.
+ */
+@Composable
+private fun TextBoxHandle(modifier: Modifier, onDrag: (Float, Float) -> Unit) {
+    // pointerInput(Unit) starts once and keeps the lambda it first saw; the box's scale
+    // changes when the view is zoomed, and the drag must be turned into document units at
+    // the scale of the moment.
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    Box(
+        modifier = modifier
+            .size(HANDLE_TOUCH)
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    currentOnDrag(dragAmount.x, dragAmount.y)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(HANDLE_DOT)
+                .background(Color.White, CircleShape)
+                .border(2.dp, BrnaColors.Accent, CircleShape)
+        )
+    }
 }
 
 /** The keys that move the cursor without typing, which Rnote's typewriter answers with a thump. */
@@ -199,15 +272,21 @@ private val CURSOR_KEYS = setOf(
 )
 
 /**
- * Compose's own family for a name Rnote uses. The generic ones resolve weight and slant
- * the way NativeElementRenderer.typeface does; for a family the tablet doesn't have — a
- * desktop font like Cantarell — Android falls back to its sans-serif, and so does this.
+ * Compose's own family for a name Rnote uses. A font loaded through [CustomFonts] is
+ * used if one is registered for it, so the Typewriter edits in the same face
+ * [NativeElementRenderer.typeface] draws it in. Otherwise the generic families resolve
+ * weight and slant the way NativeElementRenderer.typeface does; for a family the tablet
+ * doesn't have and no font was loaded for — a desktop font like Cantarell — Android
+ * falls back to its sans-serif, and so does this.
  */
-private fun composeFamily(name: String): FontFamily = when (name.lowercase()) {
-    "serif" -> FontFamily.Serif
-    "monospace", "mono" -> FontFamily.Monospace
-    "cursive" -> FontFamily.Cursive
-    else -> FontFamily.SansSerif
+private fun composeFamily(name: String): FontFamily {
+    CustomFonts.get(name)?.let { return FontFamily(it) }
+    return when (name.lowercase()) {
+        "serif" -> FontFamily.Serif
+        "monospace", "mono" -> FontFamily.Monospace
+        "cursive" -> FontFamily.Cursive
+        else -> FontFamily.SansSerif
+    }
 }
 
 /**

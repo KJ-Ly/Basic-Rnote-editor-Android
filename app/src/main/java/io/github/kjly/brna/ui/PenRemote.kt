@@ -24,7 +24,11 @@ object PenRemote {
      */
     fun isFromPen(deviceName: String?, deviceId: Int, typingKeyboard: Boolean): Boolean {
         if (typingKeyboard) return false
-        if (deviceName?.contains("pen", ignoreCase = true) == true) return true
+        // "Pen" as a word of its own: "S Pen", "sec_e-pen" — not the "pen" inside
+        // headphones called "OpenRun", whose Play/Pause would undo a stroke.
+        if (deviceName != null && PEN_WORD.containsMatchIn(deviceName)) return true
         return deviceName == null || deviceId == KeyCharacterMap.VIRTUAL_KEYBOARD
     }
+
+    private val PEN_WORD = Regex("(^|[^a-z])pen([^a-z]|$)", RegexOption.IGNORE_CASE)
 }
