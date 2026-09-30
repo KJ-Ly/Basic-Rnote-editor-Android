@@ -179,7 +179,7 @@ object SettingsManager {
             .apply()
     }
 
-    /** Whether a screen narrower than 600 dp gets the tablet layout (see [io.github.kjly.brna.model.TabletLayout]); off until switched on. */
+    /** Whether a screen narrower than 600 dp or lower than 480 dp gets the tablet layout (see [io.github.kjly.brna.model.TabletLayout]); off until switched on. */
     fun loadTabletLayout(context: Context): Boolean =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getBoolean(KEY_TABLET_LAYOUT, false)

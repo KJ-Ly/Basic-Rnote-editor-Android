@@ -1554,14 +1554,17 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             // Rnote's own breakpoint collapses its sidebar under 1250sp on a desktop window;
-            // here, below Material's compact/medium 600dp boundary, the floating PenConfigStrip
-            // would overlap most of the drawing area on a phone-width screen, so it's hidden
-            // rather than degraded in place, and Page Settings falls back to a modal sheet
-            // instead of a docked side panel. "Tablet Layout" in the canvas menu lifts that on a
-            // narrow screen, and the interface is then scaled to fit 600 dp (see TabletLayout).
-            val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+            // here, below Material's compact/medium boundaries (600dp wide, 480dp high) the
+            // floating PenConfigStrip would overlap most of the drawing area on a phone-width
+            // screen, or be cut off on a phone held sideways, so it's hidden rather than
+            // degraded in place, and Page Settings falls back to a modal sheet instead of a
+            // docked side panel. "Tablet Layout" in the canvas menu lifts that on such a screen,
+            // and the interface is then scaled to fit 600 x 480 dp (see TabletLayout).
+            val screenConfig = androidx.compose.ui.platform.LocalConfiguration.current
+            val screenWidthDp = screenConfig.screenWidthDp
+            val screenHeightDp = screenConfig.screenHeightDp
             var tabletLayout by remember { mutableStateOf(SettingsManager.loadTabletLayout(this)) }
-            val isCompactWidth = TabletLayout.isCompact(screenWidthDp, tabletLayout)
+            val isCompactLayout = TabletLayout.isCompact(screenWidthDp, screenHeightDp, tabletLayout)
 
             // ── Persistent settings — loaded once from SharedPreferences ──────────
             var paperStyle by remember {
@@ -2765,10 +2768,10 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // With the tablet layout on a narrow screen, everything is drawn smaller so that 600 dp
-            // of it fit across; dp, sp and text follow, pixel work (the canvas, touch) does not.
+            // With the tablet layout on a small screen, everything is drawn smaller so that 600 x
+            // 480 dp of it fit; dp, sp and text follow, pixel work (the canvas, touch) does not.
             val baseDensity = LocalDensity.current
-            val layoutScale = TabletLayout.scale(screenWidthDp, tabletLayout)
+            val layoutScale = TabletLayout.scale(screenWidthDp, screenHeightDp, tabletLayout)
             val layoutDensity = remember(baseDensity, layoutScale) {
                 if (layoutScale == 1f) baseDensity else Density(baseDensity.density * layoutScale, baseDensity.fontScale)
             }
@@ -2841,7 +2844,7 @@ class MainActivity : ComponentActivity() {
                                 onToggleRespectBorders = toggleRespectBorders,
                                 penSounds = penSoundsOn,
                                 onTogglePenSounds = togglePenSounds,
-                                showTabletLayout = screenWidthDp < TabletLayout.MIN_WIDTH_DP,
+                                showTabletLayout = TabletLayout.isNarrow(screenWidthDp, screenHeightDp),
                                 tabletLayout = tabletLayout,
                                 onToggleTabletLayout = toggleTabletLayout,
                                 blockPinchZoom = toolConfig.blockPinchZoom,
@@ -3331,8 +3334,8 @@ class MainActivity : ComponentActivity() {
                         }
 
                         // Left edge, vertically centered: per-pen config (matches RnPensSideBar).
-                        // Hidden below the width breakpoint (see isCompactWidth, top of file).
-                        if (!isCompactWidth && !focusMode) PenConfigStrip(
+                        // Hidden on a screen too small for it (see isCompactLayout, top of file).
+                        if (!isCompactLayout && !focusMode) PenConfigStrip(
                             toolConfig = toolConfig,
                             hasActiveSelection = selectedStrokes.isNotEmpty() || selectedNatives.isNotEmpty(),
                             onBrushStyleSelected = { style -> toolConfig = toolConfig.copy(brushStyle = style) },
@@ -3433,7 +3436,7 @@ class MainActivity : ComponentActivity() {
                                 penModes = penModes,
                                 onPenModesChanged = changePenModes,
                                 onDismiss = { showPageSettings = false },
-                                dockedAsSidePanel = !isCompactWidth,
+                                dockedAsSidePanel = !isCompactLayout,
                                 modifier = Modifier.align(Alignment.CenterEnd)
                             )
                         }
@@ -3553,7 +3556,7 @@ class MainActivity : ComponentActivity() {
                                 onClose = { showFiles = false },
                                 modifier = Modifier
                                     .fillMaxHeight()
-                                    .then(if (isCompactWidth) Modifier.fillMaxWidth() else Modifier.width(340.dp))
+                                    .then(if (isCompactLayout) Modifier.fillMaxWidth() else Modifier.width(340.dp))
                             )
                         }
 

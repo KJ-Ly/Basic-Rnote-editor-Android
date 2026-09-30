@@ -121,7 +121,7 @@ fun RnoteTopBar(
     onToggleRespectBorders: () -> Unit = {},
     penSounds: Boolean = false,
     onTogglePenSounds: () -> Unit = {},
-    /** "Tablet Layout", offered on a screen narrower than 600 dp, where the pen strip is otherwise left out. */
+    /** "Tablet Layout", offered on a screen narrower than 600 dp or lower than 480 dp, where the pen strip is otherwise left out. */
     showTabletLayout: Boolean = false,
     tabletLayout: Boolean = false,
     onToggleTabletLayout: () -> Unit = {},

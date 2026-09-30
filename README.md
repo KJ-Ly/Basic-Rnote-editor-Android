@@ -174,8 +174,8 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   edge only, and anywhere on an Infinite one — so nothing is written where Rnote can't
   scroll to. What is pasted or imported without being dropped somewhere lands where
   Rnote puts it: in the view, never before the document's origin. On a screen narrower
-  than 600 dp, such as a phone, the pen strip is left out; "Tablet Layout" in the canvas
-  menu brings the whole layout back, scaled down to fit.
+  than 600 dp or lower than 480 dp, such as a phone held either way, the pen strip is left
+  out; "Tablet Layout" in the canvas menu brings the whole layout back, scaled down to fit.
 - **Keyboard shortcuts** for a hardware keyboard, Rnote's own: Ctrl+Z / Ctrl+Shift+Z
   (and Ctrl+Y), Ctrl+S / Ctrl+Shift+S, Ctrl+O, Ctrl+N, Ctrl+P, Ctrl+Shift+I,
   Ctrl+L, Ctrl+Shift+O, Ctrl+Shift+P, Ctrl+Shift+A / Ctrl+Shift+R for pages, F11,
