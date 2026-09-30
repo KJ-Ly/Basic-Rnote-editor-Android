@@ -534,13 +534,14 @@ object RnoteNativeSerializer {
     private fun RnoteNativeColor.toJson() =
         """{"r":$r,"g":$g,"b":$b,"a":$a}"""
 
+    /** Rnote's `PatternStyle` names. "ruled" and "blank" aren't among them, and desktop refused any file carrying one. */
     private fun NativePatternType.toApiString() = when (this) {
         NativePatternType.GRID     -> "grid"
-        NativePatternType.RULED    -> "ruled"
+        NativePatternType.RULED    -> "lines"
         NativePatternType.DOTS     -> "dots"
         NativePatternType.ISO_GRID -> "isometric_grid"
         NativePatternType.ISO_DOTS -> "isometric_dots"
-        NativePatternType.BLANK    -> "blank"
+        NativePatternType.BLANK    -> "none"
     }
 
     /** Escapes a string for safe JSON embedding. */
