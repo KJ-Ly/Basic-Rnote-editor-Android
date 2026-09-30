@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -17,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -161,9 +163,11 @@ fun InlineTextEditor(
     }
 
     val outline = Color(0x993584E4)
-    // Wraps the field so the handles below can sit pinned to its top-left and right-edge,
-    // wherever the field ends up sized once its text is laid out.
-    Box(modifier = Modifier.offset { IntOffset(screen.x.roundToInt(), screen.y.roundToInt()) }) {
+    // The handles poke out past the outline, and a touch outside a parent's bounds never
+    // reaches its children. So the wrapper is bigger than the field by the handles' reach on
+    // every side (the field is padded inside it), and starts that far up and to the left.
+    val reach = with(density) { HANDLE_REACH.roundToPx() }
+    Box(modifier = Modifier.offset { IntOffset(screen.x.roundToInt() - reach, screen.y.roundToInt() - reach) }) {
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -173,6 +177,7 @@ fun InlineTextEditor(
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             onTextLayout = { layout = it },
             modifier = Modifier
+                .padding(HANDLE_REACH)
                 .then(
                     if (style.maxWidth != null && style.maxWidth > 0f) {
                         Modifier.width(with(density) { (style.maxWidth * pxPerUnit).toDp() })
@@ -205,37 +210,59 @@ fun InlineTextEditor(
                     }
                 }
         )
-        // Top-left: drags the box around the canvas. Sits half outside the outline so it
-        // doesn't sit over the text itself and steal taps meant for placing the cursor.
+        // Top-left: drags the box around the canvas. Its dot sits just outside the outline
+        // corner so it doesn't cover the text itself and steal taps meant for the cursor.
         TextBoxHandle(
-            modifier = Modifier.align(Alignment.TopStart).offset((-11).dp, (-11).dp),
+            modifier = Modifier.align(Alignment.TopStart),
             onDrag = { dxPx, dyPx -> onMove(dxPx / pxPerUnit, dyPx / pxPerUnit) }
         )
         // Right edge, vertically centered on however tall the wrapped text ends up: drags
         // the wrap width narrower or wider. Only the width is ever set this way — the
         // height always follows from how the text then reflows, the same as Rnote's own.
         TextBoxHandle(
-            modifier = Modifier.align(Alignment.CenterEnd).offset(11.dp, 0.dp),
+            modifier = Modifier.align(Alignment.CenterEnd),
             onDrag = { dxPx, _ -> onResizeWidth(dxPx / pxPerUnit) }
         )
     }
 }
 
-/** A small round drag handle for [InlineTextEditor]'s move and resize-width affordances. */
+/** How far a handle's touch area reaches out past the box's outline (its dot, centered in it, then sits 6 dp out). */
+private val HANDLE_REACH = 22.dp
+
+/** The touch area of a handle: bigger than its dot, so a fingertip or the pen finds it. */
+private val HANDLE_TOUCH = 32.dp
+
+/** The dot drawn in a handle's touch area. */
+private val HANDLE_DOT = 18.dp
+
+/**
+ * A small round drag handle for [InlineTextEditor]'s move and resize-width affordances:
+ * a [HANDLE_DOT] circle in a [HANDLE_TOUCH] square that takes the drag.
+ */
 @Composable
 private fun TextBoxHandle(modifier: Modifier, onDrag: (Float, Float) -> Unit) {
+    // pointerInput(Unit) starts once and keeps the lambda it first saw; the box's scale
+    // changes when the view is zoomed, and the drag must be turned into document units at
+    // the scale of the moment.
+    val currentOnDrag by rememberUpdatedState(onDrag)
     Box(
         modifier = modifier
-            .size(18.dp)
-            .background(Color.White, CircleShape)
-            .border(2.dp, BrnaColors.Accent, CircleShape)
+            .size(HANDLE_TOUCH)
             .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
-                    onDrag(dragAmount.x, dragAmount.y)
+                    currentOnDrag(dragAmount.x, dragAmount.y)
                 }
-            }
-    )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(HANDLE_DOT)
+                .background(Color.White, CircleShape)
+                .border(2.dp, BrnaColors.Accent, CircleShape)
+        )
+    }
 }
 
 /** The keys that move the cursor without typing, which Rnote's typewriter answers with a thump. */

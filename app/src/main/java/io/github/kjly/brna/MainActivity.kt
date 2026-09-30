@@ -2403,23 +2403,27 @@ class MainActivity : ComponentActivity() {
             } ?: emptySet()
 
             /**
-             * Rnote's font size box, on a selection: sets it there directly, the way the
+             * The Typewriter's font size, set directly on the box being typed into, the way the
              * bold/italic switches do rather than only queuing it for the next character
              * (there is no keyboard shortcut toggling size the way Ctrl+B does, so there is
-             * nothing to keep "pending" for). With no selection, just the default for text
-             * typed next, same as before this had a selection to apply to.
+             * nothing to keep "pending" for): on the selection if there is one, else on the
+             * whole box. It is also the size of the next new box.
              */
             val onTextFontSizeChanged: (Float) -> Unit = { newSize ->
                 toolConfig = toolConfig.updateActiveSize(newSize)
                 val session = textSession
                 val element = session?.element
-                if (session != null && element != null && !session.value.selection.collapsed) {
+                if (session != null && element != null) {
                     if (!session.undoTaken) {
                         pushUndo()
                         redoStack.clear()
                     }
                     val selection = session.value.selection
-                    val updated = NativeEditing.withFontSize(element, selection.min, selection.max, newSize)
+                    val updated = if (selection.collapsed) {
+                        NativeEditing.withBoxFontSize(element, newSize)
+                    } else {
+                        NativeEditing.withFontSize(element, selection.min, selection.max, newSize)
+                    }
                     putText(element, updated)
                     isModified = true
                     textSession = session.copy(element = updated, template = updated, undoTaken = true)
@@ -2430,18 +2434,22 @@ class MainActivity : ComponentActivity() {
                 val selection = session.value.selection
                 TextFormatting.sizeAt(session.element, selection.min, selection.max)
             } ?: toolConfig.textSize
-            /** Rnote's font family box: on a selection directly, else the default going forward. */
+            /** The Typewriter's font family: on the selection if there is one, else on the whole box; also the next new box's. */
             val onTextFontFamilySelected: (String) -> Unit = { family ->
                 toolConfig = toolConfig.copy(textFamily = family)
                 val session = textSession
                 val element = session?.element
-                if (session != null && element != null && !session.value.selection.collapsed) {
+                if (session != null && element != null) {
                     if (!session.undoTaken) {
                         pushUndo()
                         redoStack.clear()
                     }
                     val selection = session.value.selection
-                    val updated = NativeEditing.withFontFamily(element, selection.min, selection.max, family)
+                    val updated = if (selection.collapsed) {
+                        NativeEditing.withBoxFontFamily(element, family)
+                    } else {
+                        NativeEditing.withFontFamily(element, selection.min, selection.max, family)
+                    }
                     putText(element, updated)
                     isModified = true
                     textSession = session.copy(element = updated, template = updated, undoTaken = true)

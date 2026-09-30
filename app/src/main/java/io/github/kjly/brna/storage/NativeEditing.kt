@@ -887,19 +887,50 @@ object NativeEditing {
 
     /**
      * [size] set for the chars [startChar, endChar) of [el] — a ranged `font_size`
-     * attribute, the way desktop Rnote's font size box does on a selection. Whatever
-     * ranged size already covered any part of the selection is replaced.
+     * attribute, which Rnote reads like the ranged bold and italic ones. Whatever ranged
+     * size already covered any part of the selection is replaced.
      */
     fun withFontSize(el: NativeTextElement, startChar: Int, endChar: Int, size: Float): NativeTextElement =
         editRanges(el, startChar, endChar, "font_size") { JsonPrimitive(round3(size.toDouble())) }
 
     /**
      * [family] set for the chars [startChar, endChar) of [el] — a ranged `font_family`
-     * attribute, the way desktop Rnote's font combo box does on a selection. Whatever
-     * ranged family already covered any part of the selection is replaced.
+     * attribute, which Rnote reads like the ranged bold and italic ones. Whatever ranged
+     * family already covered any part of the selection is replaced.
      */
     fun withFontFamily(el: NativeTextElement, startChar: Int, endChar: Int, family: String): NativeTextElement =
         editRanges(el, startChar, endChar, "font_family") { JsonPrimitive(family) }
+
+    /**
+     * [size] set for the whole of [el] — the box's own `text_style.font_size` — with the
+     * ranged sizes that would still override it dropped, so every char ends up at [size].
+     * What the Typewriter's size buttons do with no selection, and after which typing at
+     * the end of the text gets the same size as the rest.
+     */
+    fun withBoxFontSize(el: NativeTextElement, size: Float): NativeTextElement =
+        withBoxStyle(el, "font_size", JsonPrimitive(round3(size.toDouble()))) { it.copy(fontSize = size) }
+
+    /** [family] set for the whole of [el], as [withBoxFontSize] does for the size. */
+    fun withBoxFontFamily(el: NativeTextElement, family: String): NativeTextElement =
+        withBoxStyle(el, "font_family", JsonPrimitive(family)) { it.copy(fontFamily = family) }
+
+    /** [el] with `text_style.[key]` = [value] and no ranged attribute of that key left to override it. */
+    private inline fun withBoxStyle(
+        el: NativeTextElement,
+        key: String,
+        value: JsonElement,
+        fallback: (NativeTextElement) -> NativeTextElement
+    ): NativeTextElement {
+        val obj = el.raw?.takeIf { it.isJsonObject }?.deepCopy()?.asJsonObject ?: textJson(el)
+        val style = obj.get("text_style")?.takeIf { it.isJsonObject }?.asJsonObject ?: return fallback(el)
+        style.add(key, value)
+        style.get("ranged_text_attributes")?.takeIf { it.isJsonArray }?.asJsonArray?.let { existing ->
+            val kept = JsonArray()
+            for (item in existing) if (!(isRange(item) && attributeKey(item) == key)) kept.add(item)
+            style.add("ranged_text_attributes", kept)
+        }
+        return parseText(obj) ?: fallback(el)
+    }
 
     /** The value Rnote's typewriter buttons set. */
     private fun onValue(toggle: TextToggle): JsonElement = when (toggle) {
