@@ -9,6 +9,7 @@ import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
 import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenShortcuts
+import io.github.kjly.brna.model.TextDefaults
 
 /**
  * Persists user preferences (paper style, tool settings) across app sessions
@@ -43,6 +44,9 @@ object SettingsManager {
     private const val KEY_PEN_SHORTCUTS      = "penShortcuts"
     private const val KEY_PEN_MODES          = "penModes"
     private const val KEY_PDF_IMPORT         = "pdfImportPrefs"
+    private const val KEY_TEXT_SIZE          = "textSize"
+    private const val KEY_TEXT_FAMILY        = "textFamily"
+    private const val KEY_TABLET_LAYOUT      = "tabletLayout"
 
     fun save(
         context: Context,
@@ -149,6 +153,41 @@ object SettingsManager {
             .edit()
             .putBoolean(KEY_SPACE_LIMIT_VERTICAL, vertical)
             .putBoolean(KEY_SPACE_LIMIT_HORIZONTAL, horizontal)
+            .apply()
+    }
+
+    /**
+     * The Typewriter's size for new text: the last one chosen, as Rnote keeps its typewriter
+     * settings; Rnote's default until then.
+     */
+    fun loadTextSize(context: Context): Float =
+        TextDefaults.size(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getFloat(KEY_TEXT_SIZE, TextDefaults.SIZE)
+        )
+
+    /** The raw family last chosen; see [TextDefaults.family] for turning it into one that can be used. */
+    fun loadTextFamily(context: Context): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_TEXT_FAMILY, null)
+
+    fun saveTextDefaults(context: Context, size: Float, family: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_TEXT_SIZE, size)
+            .putString(KEY_TEXT_FAMILY, family)
+            .apply()
+    }
+
+    /** Whether a screen narrower than 600 dp gets the tablet layout (see [io.github.kjly.brna.model.TabletLayout]); off until switched on. */
+    fun loadTabletLayout(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_TABLET_LAYOUT, false)
+
+    fun saveTabletLayout(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_TABLET_LAYOUT, on)
             .apply()
     }
 

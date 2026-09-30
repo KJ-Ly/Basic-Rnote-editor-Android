@@ -48,6 +48,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -74,6 +75,7 @@ import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -116,7 +118,9 @@ import io.github.kjly.brna.model.PenFavorite
 import io.github.kjly.brna.model.brushFavorite
 import io.github.kjly.brna.model.withFavorite
 import io.github.kjly.brna.model.Stroke
+import io.github.kjly.brna.model.TabletLayout
 import io.github.kjly.brna.model.TextAlignment
+import io.github.kjly.brna.model.TextDefaults
 import io.github.kjly.brna.model.TextFormatting
 import io.github.kjly.brna.model.TextToggle
 import io.github.kjly.brna.model.ToolConfig
@@ -1553,8 +1557,11 @@ class MainActivity : ComponentActivity() {
             // here, below Material's compact/medium 600dp boundary, the floating PenConfigStrip
             // would overlap most of the drawing area on a phone-width screen, so it's hidden
             // rather than degraded in place, and Page Settings falls back to a modal sheet
-            // instead of a docked side panel.
-            val isCompactWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 600
+            // instead of a docked side panel. "Tablet Layout" in the canvas menu lifts that on a
+            // narrow screen, and the interface is then scaled to fit 600 dp (see TabletLayout).
+            val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+            var tabletLayout by remember { mutableStateOf(SettingsManager.loadTabletLayout(this)) }
+            val isCompactWidth = TabletLayout.isCompact(screenWidthDp, tabletLayout)
 
             // ── Persistent settings — loaded once from SharedPreferences ──────────
             var paperStyle by remember {
@@ -1572,9 +1579,16 @@ class MainActivity : ComponentActivity() {
                         blockPinchZoom = SettingsManager.loadBlockPinchZoom(this),
                         respectBorders = SettingsManager.loadRespectBorders(this),
                         spaceLimitVerticalBorders = SettingsManager.loadSpaceLimitVertical(this),
-                        spaceLimitHorizontalBorders = SettingsManager.loadSpaceLimitHorizontal(this)
+                        spaceLimitHorizontalBorders = SettingsManager.loadSpaceLimitHorizontal(this),
+                        // The Typewriter's size and family, as last chosen: a document usually
+                        // keeps to one, and setting them for every new box is a chore.
+                        textSize = SettingsManager.loadTextSize(this),
+                        textFamily = TextDefaults.family(SettingsManager.loadTextFamily(this)) { CustomFonts.get(it) != null }
                     )
                 )
+            }
+            LaunchedEffect(toolConfig.textSize, toolConfig.textFamily) {
+                SettingsManager.saveTextDefaults(this@MainActivity, toolConfig.textSize, toolConfig.textFamily)
             }
             // Rnote's "Pen Sounds": off by default, kept between sessions; the sounds are only
             // loaded while they are on.
@@ -1601,6 +1615,10 @@ class MainActivity : ComponentActivity() {
             val togglePenSounds: () -> Unit = {
                 penSoundsOn = !penSoundsOn
                 SettingsManager.savePenSounds(this@MainActivity, penSoundsOn)
+            }
+            val toggleTabletLayout: () -> Unit = {
+                tabletLayout = !tabletLayout
+                SettingsManager.saveTabletLayout(this@MainActivity, tabletLayout)
             }
             // Rnote's other canvas menu switches, kept between sessions as Rnote keeps them.
             val toggleBlockPinchZoom: () -> Unit = {
@@ -2747,6 +2765,14 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            // With the tablet layout on a narrow screen, everything is drawn smaller so that 600 dp
+            // of it fit across; dp, sp and text follow, pixel work (the canvas, touch) does not.
+            val baseDensity = LocalDensity.current
+            val layoutScale = TabletLayout.scale(screenWidthDp, tabletLayout)
+            val layoutDensity = remember(baseDensity, layoutScale) {
+                if (layoutScale == 1f) baseDensity else Density(baseDensity.density * layoutScale, baseDensity.fontScale)
+            }
+            CompositionLocalProvider(LocalDensity provides layoutDensity) {
             BabyRnoteTheme(darkTheme = paperStyle.isDarkMode) {
                 Scaffold(
                     snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -2815,6 +2841,9 @@ class MainActivity : ComponentActivity() {
                                 onToggleRespectBorders = toggleRespectBorders,
                                 penSounds = penSoundsOn,
                                 onTogglePenSounds = togglePenSounds,
+                                showTabletLayout = screenWidthDp < TabletLayout.MIN_WIDTH_DP,
+                                tabletLayout = tabletLayout,
+                                onToggleTabletLayout = toggleTabletLayout,
                                 blockPinchZoom = toolConfig.blockPinchZoom,
                                 onToggleBlockPinchZoom = toggleBlockPinchZoom,
                                 onZoomOut = { zoomBy(1f / (1f + ViewportState.ZOOM_STEP)) },
@@ -3840,6 +3869,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+            }
             }
         }
         // "Open with" — only for the launch that brought the file, not when the activity

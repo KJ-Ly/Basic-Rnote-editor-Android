@@ -120,6 +120,10 @@ fun RnoteTopBar(
     onToggleRespectBorders: () -> Unit = {},
     penSounds: Boolean = false,
     onTogglePenSounds: () -> Unit = {},
+    /** "Tablet Layout", offered on a screen narrower than 600 dp, where the pen strip is otherwise left out. */
+    showTabletLayout: Boolean = false,
+    tabletLayout: Boolean = false,
+    onToggleTabletLayout: () -> Unit = {},
     blockPinchZoom: Boolean = false,
     onToggleBlockPinchZoom: () -> Unit = {},
     /** Rnote's canvas menu zoom row: out, in, to the page's width and to its real size. */
@@ -347,6 +351,13 @@ fun RnoteTopBar(
                         text = { Text("Block Pinch to Zoom") },
                         onClick = onToggleBlockPinchZoom
                     )
+                    if (showTabletLayout) {
+                        DropdownMenuItem(
+                            leadingIcon = { CheckMark(tabletLayout) },
+                            text = { Text("Tablet Layout") },
+                            onClick = onToggleTabletLayout
+                        )
+                    }
                 }
             }
 

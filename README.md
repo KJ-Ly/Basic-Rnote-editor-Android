@@ -60,7 +60,8 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   how the text is drawn changes; the note's own font name is kept as it is. The font
   size and (once a font is loaded) the font family are set for the selection, or for the
   whole box with none; a round handle at the box's top-left corner moves it, one on its
-  right edge sets the width the text wraps at.
+  right edge sets the width the text wraps at. The size and family chosen last are kept
+  between sessions, so a document that keeps to one doesn't have them set for every box.
 - **Eraser**: Trash Strokes and Split Strokes modes. Like Rnote's, it erases ink
   and shapes and leaves text and images alone.
 - **Selector**, for ink and for desktop text, shapes and images alike, in
@@ -172,7 +173,9 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   one's width and a page below what is on it, past a Semi Infinite one's top and left
   edge only, and anywhere on an Infinite one — so nothing is written where Rnote can't
   scroll to. What is pasted or imported without being dropped somewhere lands where
-  Rnote puts it: in the view, never before the document's origin.
+  Rnote puts it: in the view, never before the document's origin. On a screen narrower
+  than 600 dp, such as a phone, the pen strip is left out; "Tablet Layout" in the canvas
+  menu brings the whole layout back, scaled down to fit.
 - **Keyboard shortcuts** for a hardware keyboard, Rnote's own: Ctrl+Z / Ctrl+Shift+Z
   (and Ctrl+Y), Ctrl+S / Ctrl+Shift+S, Ctrl+O, Ctrl+N, Ctrl+P, Ctrl+Shift+I,
   Ctrl+L, Ctrl+Shift+O, Ctrl+Shift+P, Ctrl+Shift+A / Ctrl+Shift+R for pages, F11,
