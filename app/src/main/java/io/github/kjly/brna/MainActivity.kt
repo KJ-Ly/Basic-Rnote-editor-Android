@@ -3927,6 +3927,24 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    /**
+     * "Open with" while the app is already running: singleTask brings this instance back
+     * rather than starting another one, and the file comes in a tab of its own here.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        lifecycleScope.launch {
+            // openDocument drops a file while something else is loading; wait for that to end.
+            snapshotFlow { busyMessage }.first { it == null }
+            // The note on screen is saved first, as openRecent does.
+            autosaveNow()
+            openDocument(uri)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         // Toni may have saved the open note on the laptop meanwhile.
