@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -484,7 +485,11 @@ private fun EntryRow(
                 }
             }
         }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename() })
             if (entry.kind != FolderListing.Kind.FOLDER) {
                 DropdownMenuItem(text = { Text("Duplicate") }, onClick = { showMenu = false; onDuplicate() })

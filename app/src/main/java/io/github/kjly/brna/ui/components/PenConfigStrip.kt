@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -314,7 +315,11 @@ private fun FavoriteSlots(
                     )
                 }
             }
-            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+                modifier = Modifier.heightIn(max = menuMaxHeight())
+            ) {
                 DropdownMenuItem(
                     text = { Text("Replace with current pen") },
                     onClick = {
@@ -357,7 +362,11 @@ private fun PathModellingMenu(builder: PenPathBuilder, onSelected: (PenPathBuild
             pathBuilderIcon(builder), "Path Modelling: $label",
             selected = builder != PenPathBuilder.MODELED, implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             MenuHeading("Path Modelling")
             for ((each, eachLabel, explanation) in PATH_BUILDERS) {
                 DropdownMenuItem(
@@ -405,7 +414,11 @@ private fun TexturedMenu(
     var open by remember { mutableStateOf(false) }
     Box {
         StripIconToggle(Icons.Default.Grain, "Texture", selected = true, implemented = true) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             Text(
                 "Density (dots per 10×10)",
                 fontSize = 12.sp,
@@ -497,7 +510,11 @@ private fun PressureCurveMenu(curve: PressureCurve, onSelected: (PressureCurve) 
             PRESSURE_CURVE_ICONS.getValue(curve), "Pressure Curve: $label",
             selected = curve != PressureCurve.LINEAR, implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             for ((each, eachLabel) in PRESSURE_CURVES) {
                 DropdownMenuItem(
                     leadingIcon = {
@@ -584,7 +601,11 @@ private fun LineShapesMenu(
             selected = chosen != null,
             implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             for ((shape, icon, label) in LINE_SHAPES) {
                 DropdownMenuItem(
                     leadingIcon = { Icon(icon, null) },
@@ -627,7 +648,11 @@ private fun CurveShapesMenu(
             selected = chosen != null,
             implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             for ((shape, icon, label) in CURVE_SHAPES) {
                 DropdownMenuItem(
                     leadingIcon = { Icon(icon, null, tint = if (shape == kind) BrnaColors.Accent else LocalContentColor.current) },
@@ -700,7 +725,11 @@ private fun ShapeStyleMenu(
         } else {
             StripIconToggle(lineIcon, "Line Style: $lineLabel", selected = line != ShapeLine(), implemented = true) { open = true }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             MenuHeading("Style")
             for ((style, styleIcon, styleLabel) in SHAPER_STYLES) {
                 DropdownMenuItem(
@@ -784,7 +813,11 @@ private fun ConstraintsMenu(constraints: ShapeConstraints, onChanged: (ShapeCons
         StripIconToggle(
             Icons.Default.AspectRatio, "Constraints", selected = constraints.enabled, implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             DropdownMenuItem(
                 leadingIcon = { CheckMark(constraints.enabled) },
                 text = { Text("Enabled (hold Ctrl to switch while drawing)") },
@@ -903,7 +936,11 @@ private fun FontFamilyMenu(family: String, customFonts: List<CustomFonts.Entry>,
         StripIconToggle(Icons.Default.FontDownload, "Font: ${if (isDefault) "Default" else family}", selected = !isDefault, implemented = true) {
             open = true
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             DropdownMenuItem(
                 leadingIcon = { CheckMark(isDefault) },
                 text = { Text("Default") },
@@ -947,7 +984,11 @@ private fun AlignmentMenu(alignment: TextAlignment, onSelected: (TextAlignment) 
     val (_, icon, label) = TEXT_ALIGNMENTS.first { it.first == alignment }
     Box {
         StripIconToggle(icon, label, selected = alignment != TextAlignment.START, implemented = true) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             for ((each, eachIcon, eachLabel) in TEXT_ALIGNMENTS) {
                 DropdownMenuItem(
                     leadingIcon = {
@@ -1019,7 +1060,11 @@ private fun SelectorModeMenu(mode: SelectorMode, onModeSelected: (SelectorMode) 
     val (_, icon, label) = SELECTOR_MODES.first { it.first == mode }
     Box {
         StripIconToggle(icon, label, selected = true, implemented = true) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             for ((each, eachIcon, eachLabel) in SELECTOR_MODES) {
                 DropdownMenuItem(
                     leadingIcon = {

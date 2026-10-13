@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -702,7 +703,11 @@ private fun <T> ChoiceMenu(
             Text(text = value, fontSize = 13.sp, color = onSurface)
             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = onSurface)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = menuMaxHeight())
+        ) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(label(option)) },
