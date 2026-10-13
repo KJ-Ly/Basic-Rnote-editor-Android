@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.render.PatternMetrics
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.sqrt
@@ -285,7 +286,7 @@ object PaperBackgroundRenderer {
 
             // 3. Dot / grid pattern clipped to page
             val spacingPx = paperStyle.gridSpacingPx * zoomLevel
-            if (spacingPx >= 6f) {
+            if (spacingPx >= PatternMetrics.HIDE_BELOW_PX) {
                 clipRect(
                     left   = pageRect.left,
                     top    = pageRect.top,
@@ -335,7 +336,8 @@ object PaperBackgroundRenderer {
         // Rnote's pattern is pattern_size[0] wide and pattern_size[1] high; rows, ruled lines
         // and isometric patterns go by the height, as its own pattern does.
         val spacingYPx = paperStyle.patternHeightPx * zoomLevel
-        if (spacingYPx < 6f) return
+        val fade = PatternMetrics.fadeAlpha(minOf(spacingPx, spacingYPx))
+        if (fade <= 0f) return
 
         // Global phase: where the infinite grid origin falls on screen
         val globalPhaseX = ((panOffset.x % spacingPx) + spacingPx) % spacingPx
@@ -351,7 +353,7 @@ object PaperBackgroundRenderer {
             pageRect.top + if (offset < 0.001f) 0f else (spacingYPx - offset)
         }
 
-        val gridColor = paperStyle.currentGridColor
+        val gridColor = paperStyle.currentGridColor.let { it.copy(alpha = it.alpha * fade) }
 
         with(drawScope) {
             when (paperStyle.pattern) {
@@ -411,11 +413,11 @@ object PaperBackgroundRenderer {
     ) {
         val width     = drawScope.size.width
         val height    = drawScope.size.height
-        val gridColor = paperStyle.currentGridColor
         val spacingPx = paperStyle.gridSpacingPx * zoomLevel
         val spacingYPx = paperStyle.patternHeightPx * zoomLevel
-
-        if (spacingPx < 6f || spacingYPx < 6f) return
+        val fade = PatternMetrics.fadeAlpha(minOf(spacingPx, spacingYPx))
+        if (fade <= 0f) return
+        val gridColor = paperStyle.currentGridColor.let { it.copy(alpha = it.alpha * fade) }
 
         val startX = (panOffset.x % spacingPx + spacingPx) % spacingPx
         val startY = (panOffset.y % spacingYPx + spacingYPx) % spacingYPx

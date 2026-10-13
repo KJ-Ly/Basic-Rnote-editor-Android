@@ -284,6 +284,13 @@ fun DrawingCanvas(
         laserOpacity = 1f
         laserFading = false
     }
+    // Only a lift used to start the fade, so a trail whose stroke ended any other way —
+    // two fingers coming down, the tool changing under the pen — stayed on screen for
+    // good. Every way a stroke can end goes through here instead.
+    fun releaseLaser() {
+        if (laserTrails.isNotEmpty()) laserFading = true
+    }
+    LaunchedEffect(toolConfig.activeTool, toolConfig.toolsMode) { releaseLaser() }
 
     val currentPoints = remember { mutableStateListOf<InkPoint>() }
     // The Textured brush's seed for the stroke being drawn: a new one for every stroke,
@@ -384,11 +391,16 @@ fun DrawingCanvas(
                     spaceDrag = null
                     // Cancel any in-progress single-finger stroke
                     if (isDrawing) {
+                        // The laser keeps what it drew so far and fades it with the rest.
+                        if ((gestureTool ?: toolConfig.activeTool) == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.LASER && lassoPoints.isNotEmpty()) {
+                            laserTrails.add(lassoPoints.toList())
+                        }
                         isDrawing = false
                         currentPoints.clear()
                         lassoPoints.clear()
                         pathBuilder = null
                     }
+                    releaseLaser()
 
                     val x0 = motionEvent.getX(0)
                     val y0 = motionEvent.getY(0)
@@ -1025,7 +1037,6 @@ fun DrawingCanvas(
                             } else if (activeTool == ToolType.TOOLS && toolConfig.toolsMode == ToolsMode.LASER) {
                                 // Kept on screen, never in the note, and fading from now.
                                 if (lassoPoints.isNotEmpty()) laserTrails.add(lassoPoints.toList())
-                                laserFading = true
                             } else if (activeTool == ToolType.BRUSH && currentPoints.isNotEmpty()) {
                                 val isMarker = toolConfig.brushStyle == BrushStyle.MARKER
                                 // Rnote hands the lift to its builder as the stroke's last
@@ -1058,6 +1069,7 @@ fun DrawingCanvas(
                             lassoPoints.clear()
                         }
                         isDrawing = false
+                        releaseLaser()
                         tapDownScreen = null
                         shapeStart = null
                         shapeEnd = null
