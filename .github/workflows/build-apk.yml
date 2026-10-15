@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Check out
         uses: actions/checkout@v5
@@ -60,7 +60,7 @@ jobs:
           cp app/build/outputs/apk/release/*.apk dist/basic-rnote.apk
 
       - name: Upload the APK as a workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: basic-rnote-apk
           path: dist/basic-rnote.apk
