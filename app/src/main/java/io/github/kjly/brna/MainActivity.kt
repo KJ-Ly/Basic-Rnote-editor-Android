@@ -391,6 +391,12 @@ class MainActivity : ComponentActivity() {
     private var showTabWith: ((Uri) -> Boolean)? = null
 
     /**
+     * Files brought by "Open with" while the app was running, oldest first, waiting their
+     * turn: the UI opens one at a time, each once the note on screen is settled.
+     */
+    private val incomingOpens = mutableStateListOf<Uri>()
+
+    /**
      * Installed by the UI: called as a note being opened arrives. It gets a new tab of its
      * own, unless the tab on screen is an untouched new note it can take the place of.
      */
@@ -1962,6 +1968,21 @@ class MainActivity : ComponentActivity() {
                             settlingTab = false
                         }
                         if (pendingConflict == null) then(secured)
+                    }
+                }
+            }
+            // "Open with" while running: the next file waiting is opened once the note on
+            // screen is settled, as a tab switch does it — typing ended, saves and loads
+            // waited out, not while a conflict waits for an answer. A file that finds
+            // another load under way stays queued and goes when that one is done.
+            val nextIncoming = incomingOpens.firstOrNull()
+            LaunchedEffect(nextIncoming, settlingTab, pendingConflict, busyMessage) {
+                if (nextIncoming != null && !settlingTab && pendingConflict == null && busyMessage == null) {
+                    settleActive {
+                        if (busyMessage == null) {
+                            incomingOpens.remove(nextIncoming)
+                            openDocument(nextIncoming)
+                        }
                     }
                 }
             }
@@ -3935,14 +3956,9 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.action != Intent.ACTION_VIEW) return
-        val uri = intent.data ?: return
-        lifecycleScope.launch {
-            // openDocument drops a file while something else is loading; wait for that to end.
-            snapshotFlow { busyMessage }.first { it == null }
-            // The note on screen is saved first, as openRecent does.
-            autosaveNow()
-            openDocument(uri)
-        }
+        // Queued rather than opened here: openDocument drops a file while another loads,
+        // and the note on screen has to be settled first (see incomingOpens in the UI).
+        intent.data?.let { incomingOpens.add(it) }
     }
 
     override fun onResume() {

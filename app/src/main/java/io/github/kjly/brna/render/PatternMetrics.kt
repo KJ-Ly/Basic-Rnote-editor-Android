@@ -1,5 +1,7 @@
 package io.github.kjly.brna.render
 
+import io.github.kjly.brna.model.PaperPattern
+
 /**
  * Desktop Rnote's background pattern metrics (rnote-engine/src/document/background.rs),
  * in canvas px. Two renderers share them: the live canvas (PaperBackgroundRenderer draws
@@ -31,4 +33,15 @@ object PatternMetrics {
      */
     fun fadeAlpha(spacingPx: Float): Float =
         ((spacingPx - HIDE_BELOW_PX) / (FADE_BELOW_PX - HIDE_BELOW_PX)).coerceIn(0f, 1f)
+
+    /**
+     * The spacing [fadeAlpha] goes by: the closer of the two only where both are drawn.
+     * Ruled and isometric patterns use only the height, as Rnote's do, so a narrow
+     * pattern width must not fade or hide lines that are far apart.
+     */
+    fun fadeSpacing(pattern: PaperPattern, widthPx: Float, heightPx: Float): Float =
+        when (pattern) {
+            PaperPattern.DOTS, PaperPattern.GRID -> minOf(widthPx, heightPx)
+            else -> heightPx
+        }
 }

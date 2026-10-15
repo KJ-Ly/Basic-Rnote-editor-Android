@@ -22,6 +22,7 @@ import io.github.kjly.brna.model.RnoteNativeColor
 import io.github.kjly.brna.model.RoughStyle
 import io.github.kjly.brna.model.ShapeKind
 import io.github.kjly.brna.model.ShapeLine
+import io.github.kjly.brna.model.TextDefaults
 import io.github.kjly.brna.model.TextFormatting
 import io.github.kjly.brna.model.TexturedStyle
 import io.github.kjly.brna.model.TextToggle
@@ -1127,7 +1128,7 @@ object NativeEditing {
     }
 
     /** Rnote's `TextStyle::FONT_FAMILY_DEFAULT`. */
-    const val TEXT_FONT_FAMILY = "serif"
+    const val TEXT_FONT_FAMILY = TextDefaults.FAMILY
     /** Rnote's typewriter `text_width` default. */
     const val TEXT_WIDTH_DEFAULT = 600f
     private const val TEXT_WIDTH_MIN = 150f

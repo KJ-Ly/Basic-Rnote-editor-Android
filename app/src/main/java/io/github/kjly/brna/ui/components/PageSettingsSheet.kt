@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,7 +26,6 @@ import androidx.compose.material.icons.filled.CropLandscape
 import androidx.compose.material.icons.filled.CropPortrait
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -703,10 +701,9 @@ private fun <T> ChoiceMenu(
             Text(text = value, fontSize = 13.sp, color = onSurface)
             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = onSurface)
         }
-        DropdownMenu(
+        ScreenDropdownMenu(
             expanded = open,
-            onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = menuMaxHeight())
+            onDismissRequest = { open = false }
         ) {
             options.forEach { option ->
                 DropdownMenuItem(

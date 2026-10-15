@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,7 +38,6 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -485,10 +483,9 @@ private fun EntryRow(
                 }
             }
         }
-        DropdownMenu(
+        ScreenDropdownMenu(
             expanded = showMenu,
-            onDismissRequest = { showMenu = false },
-            modifier = Modifier.heightIn(max = menuMaxHeight())
+            onDismissRequest = { showMenu = false }
         ) {
             DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename() })
             if (entry.kind != FolderListing.Kind.FOLDER) {

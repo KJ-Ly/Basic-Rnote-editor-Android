@@ -13,7 +13,7 @@ object TextDefaults {
     const val MIN_SIZE = 1f
     const val MAX_SIZE = 512f
 
-    /** Rnote's own default family; matches NativeEditing.TEXT_FONT_FAMILY. */
+    /** Rnote's `TextStyle::FONT_FAMILY_DEFAULT`; NativeEditing.TEXT_FONT_FAMILY is this. */
     const val FAMILY = "serif"
 
     /** [saved] as a size for new text: within Rnote's limits, or the default for nothing usable. */

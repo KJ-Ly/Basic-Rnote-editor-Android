@@ -161,9 +161,9 @@ data class ToolConfig(
      */
     val fillColor: Color = Color.Transparent,
     /** Typewriter font size; Rnote's `TextStyle::FONT_SIZE_DEFAULT` is 32. */
-    val textSize: Float = 32f,
-    /** Typewriter font family for new text; matches NativeEditing.TEXT_FONT_FAMILY. */
-    val textFamily: String = "serif",
+    val textSize: Float = TextDefaults.SIZE,
+    /** Typewriter font family for new text. */
+    val textFamily: String = TextDefaults.FAMILY,
     /** How new text is aligned; Rnote's typewriter starts at the start. */
     val textAlignment: TextAlignment = TextAlignment.START,
     /** The Shaper's constraints (1:1, level, upright …), off by default as in Rnote. */
@@ -244,8 +244,7 @@ data class ToolConfig(
         // sat above the range the spin button steps through for a brush (0.1 below
         // width 12), so the finest widths desktop can express were unreachable here.
         if (activeTool == ToolType.TYPEWRITER) {
-            // Rnote's TextStyle::FONT_SIZE_MIN / _MAX.
-            return copy(textSize = newSize.coerceIn(1f, 512f))
+            return copy(textSize = newSize.coerceIn(TextDefaults.MIN_SIZE, TextDefaults.MAX_SIZE))
         }
         val minWidth = if (activeTool == ToolType.ERASER) 1f else 0.1f
         val clamped = newSize.coerceIn(minWidth, 500f)

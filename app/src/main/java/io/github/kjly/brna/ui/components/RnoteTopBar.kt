@@ -2,7 +2,6 @@ package io.github.kjly.brna.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
@@ -30,7 +29,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -247,10 +245,9 @@ fun RnoteTopBar(
             IconButton(onClick = { showShareMenu = true }) {
                 Icon(Icons.Default.Share, contentDescription = "Share", tint = iconTint)
 
-                DropdownMenu(
+                ScreenDropdownMenu(
                     expanded = showShareMenu,
-                    onDismissRequest = { showShareMenu = false },
-                    modifier = Modifier.heightIn(max = menuMaxHeight())
+                    onDismissRequest = { showShareMenu = false }
                 ) {
                     val here = if (hasPages) "This page" else "What's on screen"
                     DropdownMenuItem(
@@ -281,10 +278,9 @@ fun RnoteTopBar(
             IconButton(onClick = { showCanvasMenu = true }) {
                 Icon(GeneratedIcons.CanvasMenu, contentDescription = "Canvas Menu", tint = iconTint)
 
-                DropdownMenu(
+                ScreenDropdownMenu(
                     expanded = showCanvasMenu,
-                    onDismissRequest = { showCanvasMenu = false },
-                    modifier = Modifier.heightIn(max = menuMaxHeight())
+                    onDismissRequest = { showCanvasMenu = false }
                 ) {
                     // Buttons that stay open, as Rnote's do: zoom until it is right.
                     Row(
@@ -368,10 +364,9 @@ fun RnoteTopBar(
             IconButton(onClick = { showOverflowMenu = true }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = iconTint)
 
-                DropdownMenu(
+                ScreenDropdownMenu(
                     expanded = showOverflowMenu,
-                    onDismissRequest = { showOverflowMenu = false },
-                    modifier = Modifier.heightIn(max = menuMaxHeight())
+                    onDismissRequest = { showOverflowMenu = false }
                 ) {
                     DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.NoteAdd, null) },

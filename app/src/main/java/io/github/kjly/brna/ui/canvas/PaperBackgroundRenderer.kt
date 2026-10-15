@@ -285,23 +285,22 @@ object PaperBackgroundRenderer {
             )
 
             // 3. Dot / grid pattern clipped to page
+            // Whether it is drawn at all is drawPattern's to decide, by the spacing it uses.
             val spacingPx = paperStyle.gridSpacingPx * zoomLevel
-            if (spacingPx >= PatternMetrics.HIDE_BELOW_PX) {
-                clipRect(
-                    left   = pageRect.left,
-                    top    = pageRect.top,
-                    right  = pageRect.right,
-                    bottom = pageRect.bottom
-                ) {
-                    drawPattern(
-                        drawScope  = this,
-                        paperStyle = paperStyle,
-                        spacingPx  = spacingPx,
-                        panOffset  = panOffset,
-                        pageRect   = pageRect,
-                        zoomLevel  = zoomLevel
-                    )
-                }
+            clipRect(
+                left   = pageRect.left,
+                top    = pageRect.top,
+                right  = pageRect.right,
+                bottom = pageRect.bottom
+            ) {
+                drawPattern(
+                    drawScope  = this,
+                    paperStyle = paperStyle,
+                    spacingPx  = spacingPx,
+                    panOffset  = panOffset,
+                    pageRect   = pageRect,
+                    zoomLevel  = zoomLevel
+                )
             }
 
             // 4. Page format border (respects showFormatBorders toggle)
@@ -336,7 +335,7 @@ object PaperBackgroundRenderer {
         // Rnote's pattern is pattern_size[0] wide and pattern_size[1] high; rows, ruled lines
         // and isometric patterns go by the height, as its own pattern does.
         val spacingYPx = paperStyle.patternHeightPx * zoomLevel
-        val fade = PatternMetrics.fadeAlpha(minOf(spacingPx, spacingYPx))
+        val fade = PatternMetrics.fadeAlpha(PatternMetrics.fadeSpacing(paperStyle.pattern, spacingPx, spacingYPx))
         if (fade <= 0f) return
 
         // Global phase: where the infinite grid origin falls on screen
@@ -415,7 +414,7 @@ object PaperBackgroundRenderer {
         val height    = drawScope.size.height
         val spacingPx = paperStyle.gridSpacingPx * zoomLevel
         val spacingYPx = paperStyle.patternHeightPx * zoomLevel
-        val fade = PatternMetrics.fadeAlpha(minOf(spacingPx, spacingYPx))
+        val fade = PatternMetrics.fadeAlpha(PatternMetrics.fadeSpacing(paperStyle.pattern, spacingPx, spacingYPx))
         if (fade <= 0f) return
         val gridColor = paperStyle.currentGridColor.let { it.copy(alpha = it.alpha * fade) }
 
