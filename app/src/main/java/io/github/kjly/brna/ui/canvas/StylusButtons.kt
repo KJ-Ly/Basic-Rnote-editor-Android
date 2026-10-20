@@ -1,6 +1,7 @@
 package io.github.kjly.brna.ui.canvas
 
 import android.view.MotionEvent
+import io.github.kjly.brna.model.PenMode
 import io.github.kjly.brna.model.ShortcutKey
 
 /**
@@ -25,5 +26,16 @@ internal object StylusButtons {
         MotionEvent.TOOL_TYPE_MOUSE ->
             if (buttonState and MotionEvent.BUTTON_SECONDARY != 0) setOf(ShortcutKey.MOUSE_SECONDARY_BUTTON) else emptySet()
         else -> emptySet()
+    }
+
+    /**
+     * The end of the stylus a pointer is, as rnote-ui's `retrieve_pen_mode` reads GTK's
+     * device tool: the tip or the eraser end; null for a finger or a mouse, which leave
+     * the mode as it was.
+     */
+    fun penModeOf(toolType: Int): PenMode? = when (toolType) {
+        MotionEvent.TOOL_TYPE_STYLUS -> PenMode.PEN
+        MotionEvent.TOOL_TYPE_ERASER -> PenMode.ERASER
+        else -> null
     }
 }

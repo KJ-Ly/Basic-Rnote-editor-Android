@@ -1,6 +1,7 @@
 package io.github.kjly.brna.ui.components
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,7 +38,6 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -130,6 +130,8 @@ fun WorkspaceBrowser(
         if (tree == null || folderId == null) return@LaunchedEffect
         if (shownFolder != tree to folderId) {
             entries = null
+            // The last folder's "can't be read" is not this one's while it is being read.
+            failed = false
             shownFolder = tree to folderId
         }
         loading = true
@@ -150,10 +152,15 @@ fun WorkspaceBrowser(
     var deleting by remember { mutableStateOf<FolderListing.Entry?>(null) }
     var editing by remember { mutableStateOf<Workspaces.Workspace?>(null) }
 
-    /** Runs a file action off the main thread, then lists the folder again. */
-    fun act(action: () -> Unit) {
+    /** Tells what didn't work: a provider that refuses says nothing of its own. */
+    fun failedToast(what: String) {
+        Toast.makeText(context, "Could not $what", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Runs a file action off the main thread, then lists the folder again; [what] is what it did, if it failed. */
+    fun act(what: String, action: () -> Boolean) {
         scope.launch {
-            withContext(Dispatchers.IO) { action() }
+            if (!withContext(Dispatchers.IO) { action() }) failedToast(what)
             localRefresh++
         }
     }
@@ -274,7 +281,7 @@ fun WorkspaceBrowser(
                                     val parent = folderId
                                     if (parent != null) {
                                         val siblings = listed.mapTo(mutableSetOf()) { it.name }
-                                        act { FolderBrowser.duplicate(context, tree, parent, entry, siblings) }
+                                        act("duplicate it") { FolderBrowser.duplicate(context, tree, parent, entry, siblings) != null }
                                     }
                                 },
                                 onDelete = { deleting = entry }
@@ -306,7 +313,7 @@ fun WorkspaceBrowser(
                 val parent = folderId ?: return@NameDialog
                 when (what) {
                     Naming.NewNote -> onNewNote(tree ?: return@NameDialog, parent, name)
-                    Naming.NewFolder -> act { FolderBrowser.createFolder(context, tree ?: return@act, parent, name) }
+                    Naming.NewFolder -> act("make the folder") { FolderBrowser.createFolder(context, tree ?: return@act false, parent, name) != null }
                     is Naming.Rename -> {
                         val entry = what.entry
                         val newName = if (entry.kind == FolderListing.Kind.FOLDER) name.trim()
@@ -315,7 +322,8 @@ fun WorkspaceBrowser(
                         val wasOpen = isOpen(oldUri)
                         scope.launch {
                             val renamed = withContext(Dispatchers.IO) { FolderBrowser.rename(context, oldUri, newName) }
-                            if (renamed != null && wasOpen) onOpenRenamed(oldUri, renamed, newName)
+                            if (renamed == null) failedToast("rename it")
+                            else if (wasOpen) onOpenRenamed(oldUri, renamed, newName)
                             localRefresh++
                         }
                     }
@@ -342,7 +350,8 @@ fun WorkspaceBrowser(
                     val wasOpen = isOpen(uri)
                     scope.launch {
                         val gone = withContext(Dispatchers.IO) { FolderBrowser.delete(context, uri) }
-                        if (gone && wasOpen) onOpenDeleted(uri)
+                        if (!gone) failedToast("delete it")
+                        else if (wasOpen) onOpenDeleted(uri)
                         localRefresh++
                     }
                 }) { Text("Delete", color = BrnaColors.DestructiveTint) }
@@ -474,7 +483,10 @@ private fun EntryRow(
                 }
             }
         }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        ScreenDropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false }
+        ) {
             DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename() })
             if (entry.kind != FolderListing.Kind.FOLDER) {
                 DropdownMenuItem(text = { Text("Duplicate") }, onClick = { showMenu = false; onDuplicate() })

@@ -33,6 +33,7 @@ import io.github.kjly.brna.model.PathShape
 import io.github.kjly.brna.model.RectShape
 import io.github.kjly.brna.model.RnoteNativeColor
 import io.github.kjly.brna.model.TextFormatting
+import io.github.kjly.brna.storage.CustomFonts
 import java.nio.ByteBuffer
 import java.util.IdentityHashMap
 import kotlin.math.ceil
@@ -187,6 +188,16 @@ class NativeElementRenderer {
         roughShapes.keys.retainAll(keep)
     }
 
+    /**
+     * Drops every cached text layout, so the next [drawText] rebuilds it. Call this
+     * after a font is loaded or removed through [CustomFonts]: a text box already laid
+     * out (in whatever face it fell back to) otherwise keeps that stale layout, since
+     * [textLayouts] is keyed by element identity, not by which fonts are registered.
+     */
+    fun invalidateText() {
+        textLayouts.clear()
+    }
+
     companion object {
 
         /**
@@ -249,11 +260,13 @@ class NativeElementRenderer {
         }
 
         /**
-         * Rnote names fonts by family ("serif" by default). Android resolves the generic
-         * families and falls back to its default face for any it doesn't have installed.
+         * Rnote names fonts by family ("serif" by default). A family loaded through
+         * [CustomFonts] is used if one is registered for [familyName]; otherwise Android
+         * resolves the generic families and falls back to its default face for any it
+         * doesn't have installed.
          */
         fun typeface(familyName: String, weight: Int, italic: Boolean): Typeface {
-            val family = Typeface.create(familyName, Typeface.NORMAL)
+            val family = CustomFonts.get(familyName) ?: Typeface.create(familyName, Typeface.NORMAL)
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 Typeface.create(family, weight.coerceIn(1, 1000), italic)
             } else {

@@ -4,7 +4,7 @@ An Android note-taking app, built in Kotlin and Jetpack Compose, that reads and
 writes `.rnote` files produced by [the open-source desktop application Rnote](https://github.com/flxzt/rnote).
 
 This app does not currently embed Rnote's Rust engine — it reimplements the parts
-that matter for interoperability (the v0.14 document schema, stroke geometry,
+that matter for interoperability (the v0.14 document schema and 0.15's changes to it, stroke geometry,
 paper patterns, page layout) in pure Kotlin, so that a file drawn on the desktop
 opens on a tablet and a file drawn on the tablet opens back on the desktop.
 
@@ -54,7 +54,14 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   an existing one. Bold, italic, underline and strikethrough — from the strip,
   or Ctrl+B / Ctrl+I / Ctrl+U on a keyboard — stored as Rnote stores them, so
   formatting made on either side shows on the other. Left, centred, right or
-  justified, as Rnote aligns text.
+  justified, as Rnote aligns text. A note's text in a font Android doesn't have
+  (Cantarell, say) can be drawn in it: "Fonts…" in the ⋮ menu loads a `.ttf`, `.otf` or
+  `.ttc` file under the family name the note asks for, read from the file itself. Only
+  how the text is drawn changes; the note's own font name is kept as it is. The font
+  size and (once a font is loaded) the font family are set for the selection, or for the
+  whole box with none; a round handle at the box's top-left corner moves it, one on its
+  right edge sets the width the text wraps at. The size and family chosen last are kept
+  between sessions, so a document that keeps to one doesn't have them set for every box.
 - **Eraser**: Trash Strokes and Split Strokes modes. Like Rnote's, it erases ink
   and shapes and leaves text and images alone.
 - **Selector**, for ink and for desktop text, shapes and images alike, in
@@ -62,9 +69,15 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   intersecting path. Select all / deselect / duplicate / delete, drag-to-move,
   scale and rotate handles with an aspect-ratio lock, copy / cut / paste between
   notes, recoloring the selection — its lines and text, or its shapes' fill — and
-  Rnote's Invert Color Brightness, which turns its colors light for dark.
-- **Tools**: Rnote's Vertical Space — drag down to open up room, up to close it —
-  and its Laser, a red trail to point with that fades away and is never saved.
+  Rnote's Invert Color Brightness, which turns its colors light for dark. Paste also
+  takes what another app copied, as Rnote's does: a picture, a PDF (through the import
+  dialog), a Xournal++ file, or text as a new text box; and the same can be dragged
+  onto the note from another app in split screen, landing where it is let go.
+- **Tools**: Rnote's Vertical Space — drag down to open up room, up to close it, and
+  with Rnote's two limits, to the page column the pen went down in and down to the next
+  page border only — Offset Camera (drag the page with the pen), Zoom (drag up to zoom in, down to zoom
+  out, about where the drag began) and its Laser, a red trail to point with that
+  fades away and is never saved.
 - **Stylus-aware input**: stylus-only mode by default (finger pans and zooms),
   optional finger drawing, S-Pen Air
   Actions mapped to undo/redo, two-finger pinch-zoom and pan — the zoom blockable, as
@@ -80,13 +93,19 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   two-finger long-press toggles the eraser and Ctrl+Space the Tools. A temporary pen
   lasts while its button is held, and a temporary selector or typewriter until its
   selection is let go or its text box left, as Rnote's does.
+- **Stylus pen modes**, Rnote 0.15's, in Settings: the tip and — on a stylus that has
+  one — the eraser end each keep a pen of their own, and each can be locked, so that
+  picking another pen in the pen picker leaves it as it is ("Tool Locked", with a
+  button to unlock it). Rnote's defaults: the tip free, the eraser end locked to the
+  eraser. The app starts with the pen the tip had last, as Rnote does.
 - **Pen sounds**, Rnote's own, switched on in the canvas menu as in Rnote: a pencil
   scratching while the brush draws, a squeak at each marker stroke, and a
   typewriter — with its bell for a new line — for the Typewriter.
 - **Paper**: six patterns (dots, grid, lines, isometric grid, isometric dots,
   blank), A2–A6 / Letter / Legal / custom / infinite page sizes, four layout
   modes (fixed size, continuous vertical, semi-infinite, infinite), custom
-  background and pattern colors, adjustable spacing and DPI,
+  background and pattern colors, adjustable spacing and DPI (kept in the `.rnote`,
+  as Rnote keeps it),
   portrait/landscape, dark mode. A Fixed Size document has as many pages as Rnote
   gives it: Add Page, Remove Page and Resize to Fit Content in the canvas menu, and
   pages for an imported PDF. The isometric patterns stand on an upright edge,
@@ -102,12 +121,21 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   written back byte for byte, and one that is — moved, scaled, recolored, cut
   with the eraser — keeps its curves, since the curve segments of Rnote's
   "Curved" pen path are read, drawn as Rnote draws them, hit by the eraser and the
-  selector where the curve runs, and written back as curves. With Rnote's "Respect
+  selector where the curve runs, and written back as curves. Files from Rnote 0.15,
+  which stores positions in a new layout, open with everything in place; a save
+  writes the 0.14 layout, which Rnote 0.14 reads as its own and 0.15 converts on
+  opening, so the same note works on both. A file from an Rnote newer than 0.15,
+  whose format the app can't know yet, is shown but never saved over: a banner says
+  so, and Save makes a copy. With Rnote's "Respect
   Borders When Pasting", an inserted image stays clear of the next page border. Autosave, crash recovery, a warning before overwriting a file
   that changed elsewhere (save a copy, overwrite, or load the other version) —
   judged by the file's content, so a sync that only touches its time is no
-  alarm — a list of recent notes, and a page overview with thumbnails. Undo
-  reaches back 100 steps, as in Rnote.
+  alarm — a list of recent notes, and a page overview with thumbnails. Before a
+  save writes over a version of a file this app didn't write — as it was opened,
+  or as the laptop saved it since — that version is kept in the app's own
+  storage, the last 5 of each file for a week; "Restore Previous Version…" in the
+  menu brings one back as an unsaved note, and keeps what the file holds then as
+  well. Undo reaches back 100 steps, as in Rnote.
 - **Tabs**: several notes open at once, as in Rnote, each with its own undo
   history and view. Opening a note gives it a tab (or shows its tab if it is
   open already); a tab being left is saved first, and one that can't be is kept
@@ -122,7 +150,10 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   app is open it also looks every 30 seconds, and loads a newer version when
   nothing here is unsaved, so the tablet follows along as the laptop saves.
 - **Import**: PDF pages, and pictures from the gallery or the camera, written
-  the way desktop Rnote writes its own imports. A Xournal++ `.xopp` opens as a new
+  the way desktop Rnote writes its own imports. PDFs through Rnote's import dialog:
+  start and end page, the page width as a share of the format's, continuous or one
+  per document page, or Adjust Document (the format becomes the PDF's page, Fixed
+  Size); placed in the view and selected, as Rnote places them, the last choice kept. A Xournal++ `.xopp` opens as a new
   note, as Rnote opens one — its strokes with their pressure, highlighters, text and
   pictures, the pages one below the other — and is saved as an `.rnote` beside it,
   never over it.
@@ -134,19 +165,27 @@ slots are disabled, grayed-out placeholders for parity with desktop Rnote's layo
   every page, background and pattern included, to Android's print dialog. Copying
   a selection also puts a picture of it on Android's clipboard, as Rnote puts one on
   the desktop's, to paste into a document or a message.
-- **View**: Rnote's canvas menu — zoom out, reset and in, Zoom to Page Width — its
+- **View**: Rnote's canvas menu — zoom out, reset and in, Zoom to Page Width, and
+  Rnote 0.15's Zoom to Real Size, which shows the page as large as it is printed — its
   Focus Mode, which puts the pen picker, the colors and the pen settings away, and
-  Fullscreen, which hides Android's bars.
+  Fullscreen, which hides Android's bars. The view goes as far as Rnote's camera lets
+  it: an inch past the pages of a Fixed Size document, past a Continuous Vertical
+  one's width and a page below what is on it, past a Semi Infinite one's top and left
+  edge only, and anywhere on an Infinite one — so nothing is written where Rnote can't
+  scroll to. What is pasted or imported without being dropped somewhere lands where
+  Rnote puts it: in the view, never before the document's origin. On a screen narrower
+  than 600 dp or lower than 480 dp, such as a phone held either way, the pen strip is left
+  out; "Tablet Layout" in the canvas menu brings the whole layout back, scaled down to fit.
 - **Keyboard shortcuts** for a hardware keyboard, Rnote's own: Ctrl+Z / Ctrl+Shift+Z
   (and Ctrl+Y), Ctrl+S / Ctrl+Shift+S, Ctrl+O, Ctrl+N, Ctrl+P, Ctrl+Shift+I,
   Ctrl+L, Ctrl+Shift+O, Ctrl+Shift+P, Ctrl+Shift+A / Ctrl+Shift+R for pages, F11,
   Ctrl+C / X / V / A / D, Delete and Escape for the selection, Ctrl++ / Ctrl+- /
-  Ctrl+0 to zoom, Ctrl+1 to Ctrl+6 for the pens.
-  They follow the keyboard's layout, so Ctrl+Z is the Z key on a German
-  keyboard too.
+  Ctrl+0 to zoom, Ctrl+1 to Ctrl+6 for the pens, and Rnote 0.15's 1 to 9 (or Ctrl
+  and the number pad's 7 to 9) for the color picker's swatches, into the stroke or
+  the fill, whichever is active. They follow the keyboard's layout, so Ctrl+Z is the
+  Z key on a German keyboard too.
 
-**Not built**: layers (the stroke list is flat), the Tools pen's other styles
-(Offset Camera, Zoom — pan and pinch do that here).
+**Not built**: layers (the stroke list is flat).
 
 ## Screenshots
 

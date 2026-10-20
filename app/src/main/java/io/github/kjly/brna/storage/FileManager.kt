@@ -44,7 +44,12 @@ object FileManager {
          * A Xournal++ file made into a note, as Rnote opens one: a new, unsaved note, never
          * written back over the `.xopp` it came from.
          */
-        val imported: Boolean = false
+        val imported: Boolean = false,
+        /**
+         * The Rnote version that wrote the file, when it is newer than this app knows the
+         * format of (see [RnoteVersion]): shown, and never written back over.
+         */
+        val newerRnote: String? = null
     )
 
     /**
@@ -70,7 +75,11 @@ object FileManager {
                 } else if (gzip) {
                     // Native .rnote — parse then bridge to our editable model
                     val native = RnoteNativeParser.parse(buffered)
-                    LoadedDocument(bridgeNativeToNoteDocument(native), isNativeRnote = true)
+                    LoadedDocument(
+                        bridgeNativeToNoteDocument(native),
+                        isNativeRnote = true,
+                        newerRnote = native.fileVersion?.takeIf(RnoteVersion::isNewerThanKnown)
+                    )
                 } else {
                     // Our JSON format
                     val jsonContent = BufferedReader(InputStreamReader(buffered)).readText()
@@ -265,7 +274,9 @@ object FileManager {
             customGridColor = bg.patternColor.toComposeColor(),
             showFormatBorders = native.showBorders,
             showOriginIndicator = native.showOriginIndicator,
-            formatBorderColor = native.borderColor.toComposeColor()
+            formatBorderColor = native.borderColor.toComposeColor(),
+            // Written back as it was: a page Rnote measures at 300 dpi stays one.
+            dpi = native.formatDpi
         )
 
         return NoteDocument(

@@ -1,5 +1,7 @@
 package io.github.kjly.brna.render
 
+import io.github.kjly.brna.model.PaperPattern
+
 /**
  * Desktop Rnote's background pattern metrics (rnote-engine/src/document/background.rs),
  * in canvas px. Two renderers share them: the live canvas (PaperBackgroundRenderer draws
@@ -16,4 +18,30 @@ object PatternMetrics {
 
     /** `HEXAGON_HEIGHT` — isometric *dots* are small hexagons; this is their height. */
     const val ISO_DOT_HEIGHT = 2.0f
+
+    /** Below this many screen px between lines or dots the live canvas draws no pattern. */
+    const val HIDE_BELOW_PX = 6f
+
+    /** From this many screen px down the pattern fades towards [HIDE_BELOW_PX]. */
+    const val FADE_BELOW_PX = 10f
+
+    /**
+     * How strongly the live canvas draws a pattern whose cells are [spacingPx] screen px
+     * apart: fully from [FADE_BELOW_PX] up, not at all at [HIDE_BELOW_PX], linear between.
+     * The pattern used to switch off hard at 6 px, so just above it the lines sat 6-7 px
+     * apart on a pixel raster they did not divide — the uneven cells read as a moiré.
+     */
+    fun fadeAlpha(spacingPx: Float): Float =
+        ((spacingPx - HIDE_BELOW_PX) / (FADE_BELOW_PX - HIDE_BELOW_PX)).coerceIn(0f, 1f)
+
+    /**
+     * The spacing [fadeAlpha] goes by: the closer of the two only where both are drawn.
+     * Ruled and isometric patterns use only the height, as Rnote's do, so a narrow
+     * pattern width must not fade or hide lines that are far apart.
+     */
+    fun fadeSpacing(pattern: PaperPattern, widthPx: Float, heightPx: Float): Float =
+        when (pattern) {
+            PaperPattern.DOTS, PaperPattern.GRID -> minOf(widthPx, heightPx)
+            else -> heightPx
+        }
 }

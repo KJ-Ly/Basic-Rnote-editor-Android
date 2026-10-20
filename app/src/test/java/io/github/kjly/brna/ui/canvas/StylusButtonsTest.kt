@@ -1,8 +1,10 @@
 package io.github.kjly.brna.ui.canvas
 
 import android.view.MotionEvent
+import io.github.kjly.brna.model.PenMode
 import io.github.kjly.brna.model.ShortcutKey
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** The buttons of a pointer event, as Rnote's shortcut keys (see [StylusButtons]). */
@@ -43,5 +45,14 @@ class StylusButtonsTest {
     fun `a finger has no buttons`() {
         assertEquals(emptySet<ShortcutKey>(), StylusButtons.keysOf(MotionEvent.TOOL_TYPE_FINGER, MotionEvent.BUTTON_SECONDARY))
         assertEquals(emptySet<ShortcutKey>(), StylusButtons.keysOf(stylus, 0))
+    }
+
+    @Test
+    fun `the stylus's tip is the pen mode, its other end the eraser mode, and nothing else is either`() {
+        assertEquals(PenMode.PEN, StylusButtons.penModeOf(stylus))
+        assertEquals(PenMode.ERASER, StylusButtons.penModeOf(MotionEvent.TOOL_TYPE_ERASER))
+        assertNull(StylusButtons.penModeOf(MotionEvent.TOOL_TYPE_FINGER))
+        assertNull(StylusButtons.penModeOf(MotionEvent.TOOL_TYPE_MOUSE))
+        assertNull(StylusButtons.penModeOf(MotionEvent.TOOL_TYPE_UNKNOWN))
     }
 }

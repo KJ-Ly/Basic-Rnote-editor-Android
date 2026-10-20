@@ -119,8 +119,8 @@ object DocumentExporter {
             optimizePrinterOutput = false,
             bitmapScaleFactor = XoppConvert.IMAGE_SCALE.toFloat()
         )
-        val root = XoppConvert.fromNative(native, pages) { el ->
-            val bounds = Rect(el.minX, el.minY, el.maxX, el.maxY)
+        val root = XoppConvert.fromNative(native, pages) { el, extent ->
+            val bounds = Rect(extent.minX.toFloat(), extent.minY.toFloat(), extent.maxX.toFloat(), extent.maxY.toFloat())
             if (bounds.width <= 0f || bounds.height <= 0f) return@fromNative null
             val png = java.io.ByteArrayOutputStream()
             val drawn = ImageExporter.exportBitmap(

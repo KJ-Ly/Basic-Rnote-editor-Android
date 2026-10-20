@@ -168,9 +168,10 @@ internal object XoppFile {
         }
         val color = strokeColor(node.required("color", "XoppStroke"))
         val fill = node.optional("fill")?.let { it.toIntOrNull() ?: throw ParseException("fill $it") }
-        val width = node.required("width", "XoppStroke").split(' ').mapNotNull { it.toDoubleOrNull() }
+        val width = node.required("width", "XoppStroke").split(' ').mapNotNull { it.finiteOrNull() }
         // Rnote splits on single spaces and drops what isn't a number, then pairs them up.
-        val numbers = node.text()?.trim(' ', '\n')?.split(' ')?.mapNotNull { it.toDoubleOrNull() } ?: emptyList()
+        // A NaN or an infinity, which it would keep, is dropped too: nothing can draw it.
+        val numbers = node.text()?.trim(' ', '\n')?.split(' ')?.mapNotNull { it.finiteOrNull() } ?: emptyList()
         val coords = (0 until numbers.size - 1 step 2).map { numbers[it] to numbers[it + 1] }
         return Stroke(tool, color, fill, width, coords)
     }
@@ -253,7 +254,9 @@ internal object XoppFile {
     private fun Element.required(name: String, what: String): String =
         optional(name) ?: throw ParseException("$what without `$name`")
 
-    private fun String.toDoubleOrThrow(): Double = toDoubleOrNull() ?: throw ParseException("number $this")
+    private fun String.toDoubleOrThrow(): Double = finiteOrNull() ?: throw ParseException("number $this")
+
+    private fun String.finiteOrNull(): Double? = toDoubleOrNull()?.takeIf { it.isFinite() }
 
     // ── Writing ───────────────────────────────────────────────────────────────
 

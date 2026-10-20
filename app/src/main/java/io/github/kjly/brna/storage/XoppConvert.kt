@@ -8,11 +8,13 @@ import io.github.kjly.brna.model.NativeBitmapElement
 import io.github.kjly.brna.model.NativeBrushStroke
 import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.NativePatternType
+import io.github.kjly.brna.model.NativeShapeElement
 import io.github.kjly.brna.model.NativeStrokePoint
 import io.github.kjly.brna.model.NativeVectorImageElement
 import io.github.kjly.brna.model.PressureCurve
 import io.github.kjly.brna.model.RnoteNativeColor
 import io.github.kjly.brna.model.RnoteNativeDocument
+import io.github.kjly.brna.model.RoughStyle
 import kotlin.math.floor
 
 /**
@@ -73,11 +75,16 @@ internal object XoppConvert {
         }
 
         val solid = root.pages.firstOrNull()?.background is XoppFile.Background.Solid
-        val width = toDoc(docWidth).toFloat()
+        // The format is as wide as the widest page and one page of the average height, as
+        // Rnote divides the total by the count. A file without pages, or with pages of no
+        // size, keeps the default format rather than one of no size (Rnote's NaN).
+        val defaults = RnoteNativeDocument()
+        val width = toDoc(docWidth).toFloat().takeIf { it > 0f } ?: defaults.pageWidth
+        val height = (if (pageCount > 0) toDoc(docHeight / pageCount).toFloat() else 0f).takeIf { it > 0f }
+            ?: defaults.pageHeight
         return RnoteNativeDocument(
             pageWidth = width,
-            // The format is one page of the average height; Rnote divides the total by the count.
-            pageHeight = toDoc(docHeight / pageCount).toFloat(),
+            pageHeight = height,
             // Xournal's patterns aren't Rnote's, so a plain page for a solid background;
             // anything else keeps Rnote's default pattern, as it does there.
             background = NativeBackgroundConfig(
@@ -93,7 +100,7 @@ internal object XoppConvert {
             originX = 0f,
             originY = 0f,
             totalWidth = width,
-            totalHeight = toDoc(docHeight).toFloat()
+            totalHeight = maxOf(toDoc(docHeight).toFloat(), height)
         )
     }
 
@@ -117,7 +124,8 @@ internal object XoppConvert {
         val pressures: List<Double>
         if (pointWidths.isNotEmpty()) {
             strokeWidth = pointWidths.max()
-            pressures = pointWidths.map { it / strokeWidth }
+            // All of them 0: nothing to draw, but no 0/0 either.
+            pressures = pointWidths.map { if (strokeWidth > 0.0) it / strokeWidth else 0.0 }
         } else {
             strokeWidth = widths[0]
             pressures = coords.map { 1.0 }
@@ -216,15 +224,16 @@ internal object XoppConvert {
      * The note as Rnote exports it: each page of the note that has something on it is a
      * page, with one solid background of the note's colour; the brush strokes stay strokes,
      * and whatever else is on the page — shapes, text, images — goes in as a picture of
-     * itself underneath, drawn by [renderImage] at [IMAGE_SCALE] (a PNG, or null to leave
-     * it out). [pages] are the note's pages, at least one: for a note without pages, one
+     * itself underneath, drawn by [renderImage] over the extent it is given at
+     * [IMAGE_SCALE] (a PNG, or null to leave it out). [pages] are the note's pages, at
+     * least one: for a note without pages, one
      * round what is on it. With nothing on any, the first page's size at the origin, as
      * Rnote's `pages_bounds_w_content` gives.
      */
     fun fromNative(
         doc: RnoteNativeDocument,
         pages: List<PageRect>,
-        renderImage: (NativeCanvasElement) -> ByteArray?
+        renderImage: (NativeCanvasElement, PageRect) -> ByteArray?
     ): XoppFile.Root {
         // Rnote's render order: document, then images, then highlighters, then ink, each in
         // the order it was made in.
@@ -242,7 +251,7 @@ internal object XoppConvert {
                 if (!intersects(b, page)) continue
                 when (el) {
                     is NativeBrushStroke -> strokeOf(el, page)?.let { strokes += it }
-                    else -> renderImage(el)?.let { png ->
+                    else -> renderImage(el, b)?.let { png ->
                         images += XoppFile.Image(
                             left = toXopp(b.minX - page.minX),
                             top = toXopp(b.minY - page.minY),
@@ -271,7 +280,7 @@ internal object XoppConvert {
         val width = toXopp(el.strokeWidth.asRnoteReads())
         val pressures = el.points.map {
             val p = it.pressure.asRnoteReads()
-            if (el.textured != null) width * p else pressureCurve(el.pressureCurve, width, p)
+            if (el.textured != null) width * p else el.pressureCurve.apply(width, p)
         }
         return XoppFile.Stroke(
             tool = XoppFile.Tool.PEN,
@@ -280,19 +289,6 @@ internal object XoppConvert {
             // A curve goes as the points it runs through: Rnote's `into_elements`.
             coords = el.points.map { toXopp(it.x.asRnoteReads() - page.minX) to toXopp(it.y.asRnoteReads() - page.minY) }
         )
-    }
-
-    /** `PressureCurve::apply`, in Rnote's doubles. */
-    private fun pressureCurve(curve: PressureCurve, width: Double, pressure: Double): Double {
-        val p = pressure.coerceIn(0.0, 1.0)
-        return when (curve) {
-            PressureCurve.CONST -> width
-            PressureCurve.LINEAR -> width * p
-            PressureCurve.SQRT -> width * kotlin.math.sqrt(p)
-            PressureCurve.CBRT -> width * Math.cbrt(p)
-            PressureCurve.POW2 -> width * p * p
-            PressureCurve.POW3 -> width * p * p * p
-        }
     }
 
     /**
@@ -316,10 +312,19 @@ internal object XoppConvert {
         else -> 3
     }
 
-    /** An element's extent, a brush stroke's taking in half its width either side, as Rnote's does. */
-    private fun bounds(el: NativeCanvasElement): PageRect {
-        val half = if (el is NativeBrushStroke) el.strokeWidth / 2.0 else 0.0
-        return PageRect(el.minX - half, el.minY - half, el.maxX + half, el.maxY + half)
+    /**
+     * An element's extent as Rnote's `bounds` gives it: a stroke or shape takes in half its
+     * width either side (a Textured stroke its whole width, a rough shape its wobble too),
+     * so a level line has a height and an outline isn't cut off at its edges.
+     */
+    fun bounds(el: NativeCanvasElement): PageRect {
+        val pad = when (el) {
+            is NativeBrushStroke -> if (el.textured != null) el.strokeWidth.toDouble() else el.strokeWidth / 2.0
+            is NativeShapeElement ->
+                el.strokeWidth / 2.0 + if (el.rough != null) RoughStyle.BOUNDS_MARGIN.toDouble() else 0.0
+            else -> 0.0
+        }
+        return PageRect(el.minX - pad, el.minY - pad, el.maxX + pad, el.maxY + pad)
     }
 
     /** Rnote's `intersects_w_tolerance`. */

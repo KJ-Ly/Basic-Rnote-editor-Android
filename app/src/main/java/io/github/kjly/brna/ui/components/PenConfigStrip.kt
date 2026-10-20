@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.Height
@@ -43,8 +44,9 @@ import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.ViewAgenda
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Waves
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -101,6 +103,8 @@ import io.github.kjly.brna.model.brushFavorite
 import io.github.kjly.brna.model.ToolConfig
 import io.github.kjly.brna.model.ToolType
 import io.github.kjly.brna.model.ToolsMode
+import io.github.kjly.brna.storage.CustomFonts
+import io.github.kjly.brna.storage.NativeEditing
 import io.github.kjly.brna.ui.icons.GeneratedIcons
 import io.github.kjly.brna.ui.theme.BrnaColors
 import kotlinx.coroutines.launch
@@ -131,6 +135,8 @@ fun PenConfigStrip(
     onLockAspectRatioToggled: () -> Unit = {},
     onSelectorModeSelected: (SelectorMode) -> Unit = {},
     onToolsModeSelected: (ToolsMode) -> Unit = {},
+    /** One of the Vertical Space tool's two limits switched: true for the vertical page borders, false for the horizontal. */
+    onSpaceLimitToggled: (vertical: Boolean) -> Unit = {},
     onSnapAnglesToggled: () -> Unit = {},
     /** The Shaper's constraints changed: switched on or off, or a ratio added or taken away. */
     onShapeConstraintsChanged: (ShapeConstraints) -> Unit = {},
@@ -147,6 +153,15 @@ fun PenConfigStrip(
     /** The alignment of the text box being typed into, or else of the next one. */
     textAlignment: TextAlignment = TextAlignment.START,
     onTextAlignmentSelected: (TextAlignment) -> Unit = {},
+    /** The font size of the text box's selection (or the whole box with none), or else the next one's. */
+    textFontSize: Float = toolConfig.textSize,
+    /** Sets the size on the box's selection directly, the way [onToggleTextFormat] does — not just the default for new text, unlike [onSizeChanged] for the other tools. */
+    onTextFontSizeChanged: (Float) -> Unit = onSizeChanged,
+    /** The family of the text box's selection (or the whole box with none), or else the next one's. */
+    textFamily: String = toolConfig.textFamily,
+    onTextFontFamilySelected: (String) -> Unit = {},
+    /** Fonts loaded through CustomFonts, offered alongside Rnote's own default family. */
+    customFonts: List<CustomFonts.Entry> = emptyList(),
     /** The Solid brush's pressure curve picked, as in Rnote's brush settings. */
     onPressureCurveSelected: (PressureCurve) -> Unit = {},
     /** The Shaper's line style or line cap picked, as in Rnote's shaper settings. */
@@ -192,10 +207,10 @@ fun PenConfigStrip(
                     onShaperStyleSelected, onRoughFillSelected, onRoughHachureDegreesChanged, onSizeChanged
                 )
                 ToolType.TYPEWRITER -> TypewriterConfigPage(
-                    toolConfig, onSizeChanged, textFormats, textFormatsEnabled, onToggleTextFormat,
-                    textAlignment, onTextAlignmentSelected
+                    toolConfig, onTextFontSizeChanged, textFormats, textFormatsEnabled, onToggleTextFormat,
+                    textAlignment, onTextAlignmentSelected, textFontSize, textFamily, onTextFontFamilySelected, customFonts
                 )
-                ToolType.TOOLS -> ToolsConfigPage(toolConfig.toolsMode, onToolsModeSelected)
+                ToolType.TOOLS -> ToolsConfigPage(toolConfig, onToolsModeSelected, onSpaceLimitToggled)
             }
         }
     }
@@ -298,7 +313,10 @@ private fun FavoriteSlots(
                     )
                 }
             }
-            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            ScreenDropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
                 DropdownMenuItem(
                     text = { Text("Replace with current pen") },
                     onClick = {
@@ -341,7 +359,10 @@ private fun PathModellingMenu(builder: PenPathBuilder, onSelected: (PenPathBuild
             pathBuilderIcon(builder), "Path Modelling: $label",
             selected = builder != PenPathBuilder.MODELED, implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             MenuHeading("Path Modelling")
             for ((each, eachLabel, explanation) in PATH_BUILDERS) {
                 DropdownMenuItem(
@@ -389,7 +410,10 @@ private fun TexturedMenu(
     var open by remember { mutableStateOf(false) }
     Box {
         StripIconToggle(Icons.Default.Grain, "Texture", selected = true, implemented = true) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             Text(
                 "Density (dots per 10×10)",
                 fontSize = 12.sp,
@@ -481,7 +505,10 @@ private fun PressureCurveMenu(curve: PressureCurve, onSelected: (PressureCurve) 
             PRESSURE_CURVE_ICONS.getValue(curve), "Pressure Curve: $label",
             selected = curve != PressureCurve.LINEAR, implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             for ((each, eachLabel) in PRESSURE_CURVES) {
                 DropdownMenuItem(
                     leadingIcon = {
@@ -568,7 +595,10 @@ private fun LineShapesMenu(
             selected = chosen != null,
             implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             for ((shape, icon, label) in LINE_SHAPES) {
                 DropdownMenuItem(
                     leadingIcon = { Icon(icon, null) },
@@ -611,7 +641,10 @@ private fun CurveShapesMenu(
             selected = chosen != null,
             implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             for ((shape, icon, label) in CURVE_SHAPES) {
                 DropdownMenuItem(
                     leadingIcon = { Icon(icon, null, tint = if (shape == kind) BrnaColors.Accent else LocalContentColor.current) },
@@ -684,7 +717,10 @@ private fun ShapeStyleMenu(
         } else {
             StripIconToggle(lineIcon, "Line Style: $lineLabel", selected = line != ShapeLine(), implemented = true) { open = true }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             MenuHeading("Style")
             for ((style, styleIcon, styleLabel) in SHAPER_STYLES) {
                 DropdownMenuItem(
@@ -768,7 +804,10 @@ private fun ConstraintsMenu(constraints: ShapeConstraints, onChanged: (ShapeCons
         StripIconToggle(
             Icons.Default.AspectRatio, "Constraints", selected = constraints.enabled, implemented = true
         ) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             DropdownMenuItem(
                 leadingIcon = { CheckMark(constraints.enabled) },
                 text = { Text("Enabled (hold Ctrl to switch while drawing)") },
@@ -837,7 +876,11 @@ private fun TypewriterConfigPage(
     formatsEnabled: Boolean,
     onToggleFormat: (TextToggle) -> Unit,
     alignment: TextAlignment,
-    onAlignmentSelected: (TextAlignment) -> Unit
+    onAlignmentSelected: (TextAlignment) -> Unit,
+    fontSize: Float,
+    family: String,
+    onFamilySelected: (String) -> Unit,
+    customFonts: List<CustomFonts.Entry>
 ) {
     Text(
         text = "Tap to\ntype",
@@ -853,14 +896,54 @@ private fun TypewriterConfigPage(
         StripIconToggle(icon, label, toggle in formats, formatsEnabled) { onToggleFormat(toggle) }
     }
     AlignmentMenu(alignment, onAlignmentSelected)
+    // Fonts loaded through the Fonts… dialog (see CustomFonts): nothing to switch to
+    // until at least one is loaded, so the strip stays uncluttered until then.
+    if (customFonts.isNotEmpty()) {
+        FontFamilyMenu(family, customFonts, onFamilySelected)
+    }
     StripDivider()
-    // Font size, not a stroke width: small, Rnote's default 32, and large.
+    // Font size, not a stroke width: small, Rnote's default 32, and large. On a
+    // selection this is what the selection itself has (mixed sizes read as the
+    // toolbar's own default, same as Rnote's spin button would settle on one).
     val presets = listOf(
         BrushSizePreset.SMALL to 20f,
         BrushSizePreset.MEDIUM to 32f,
         BrushSizePreset.LARGE to 48f
     )
-    StrokeWidthPicker(toolConfig.currentActiveSize, presets, maxRange = 128f, onSizeChanged, title = "Font Size")
+    StrokeWidthPicker(fontSize, presets, maxRange = 128f, onSizeChanged, title = "Font Size")
+}
+
+/**
+ * The family as one button showing the one in use, the loaded fonts in its menu —
+ * mirrors [AlignmentMenu]'s layout. Sets the family of the box's selection (or the
+ * whole box with none), or else of the next box typed.
+ */
+@Composable
+private fun FontFamilyMenu(family: String, customFonts: List<CustomFonts.Entry>, onSelected: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val isDefault = customFonts.none { it.family.equals(family, ignoreCase = true) }
+    Box {
+        StripIconToggle(Icons.Default.FontDownload, "Font: ${if (isDefault) "Default" else family}", selected = !isDefault, implemented = true) {
+            open = true
+        }
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
+            DropdownMenuItem(
+                leadingIcon = { CheckMark(isDefault) },
+                text = { Text("Default") },
+                onClick = { open = false; onSelected(NativeEditing.TEXT_FONT_FAMILY) }
+            )
+            for (font in customFonts) {
+                DropdownMenuItem(
+                    leadingIcon = { CheckMark(font.family.equals(family, ignoreCase = true)) },
+                    text = { Text(font.family) },
+                    onClick = { open = false; onSelected(font.family) }
+                )
+            }
+        }
+    }
 }
 
 /** The typewriter's formatting switches, with their keyboard shortcuts where Rnote has one. */
@@ -890,7 +973,10 @@ private fun AlignmentMenu(alignment: TextAlignment, onSelected: (TextAlignment) 
     val (_, icon, label) = TEXT_ALIGNMENTS.first { it.first == alignment }
     Box {
         StripIconToggle(icon, label, selected = alignment != TextAlignment.START, implemented = true) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             for ((each, eachIcon, eachLabel) in TEXT_ALIGNMENTS) {
                 DropdownMenuItem(
                     leadingIcon = {
@@ -962,7 +1048,10 @@ private fun SelectorModeMenu(mode: SelectorMode, onModeSelected: (SelectorMode) 
     val (_, icon, label) = SELECTOR_MODES.first { it.first == mode }
     Box {
         StripIconToggle(icon, label, selected = true, implemented = true) { open = true }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ScreenDropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false }
+        ) {
             for ((each, eachIcon, eachLabel) in SELECTOR_MODES) {
                 DropdownMenuItem(
                     leadingIcon = {
@@ -982,25 +1071,68 @@ private fun SelectorModeMenu(mode: SelectorMode, onModeSelected: (SelectorMode) 
 // ── Tools ────────────────────────────────────────────────────────────────
 
 /**
- * Rnote's Tools pen: Vertical Space, the default, and the Laser. Its other two styles,
- * Offset Camera and Zoom, are what pan and pinch already do here.
+ * Rnote's Tools pen, its four styles in its order: Vertical Space, the default, Offset
+ * Camera (drag the page with the pen), Zoom (drag up to zoom in, down to zoom out) and
+ * the Laser.
  */
 @Composable
-private fun ToolsConfigPage(mode: ToolsMode, onModeSelected: (ToolsMode) -> Unit) {
+private fun ToolsConfigPage(
+    toolConfig: ToolConfig,
+    onModeSelected: (ToolsMode) -> Unit,
+    onSpaceLimitToggled: (vertical: Boolean) -> Unit
+) {
+    val mode = toolConfig.toolsMode
     StripIconToggle(Icons.Default.Height, "Vertical Space", selected = mode == ToolsMode.VERTICAL_SPACE, implemented = true) {
         onModeSelected(ToolsMode.VERTICAL_SPACE)
+    }
+    StripIconToggle(GeneratedIcons.ToolsOffsetCamera, "Offset Camera", selected = mode == ToolsMode.OFFSET_CAMERA, implemented = true) {
+        onModeSelected(ToolsMode.OFFSET_CAMERA)
+    }
+    StripIconToggle(GeneratedIcons.ToolsZoom, "Zoom", selected = mode == ToolsMode.ZOOM, implemented = true) {
+        onModeSelected(ToolsMode.ZOOM)
     }
     StripIconToggle(GeneratedIcons.ToolsLaser, "Laser", selected = mode == ToolsMode.LASER, implemented = true) {
         onModeSelected(ToolsMode.LASER)
     }
     StripDivider()
     Text(
-        text = if (mode == ToolsMode.LASER) "Point;\nit fades\naway" else "Drag\ndown to\nmake\nroom",
+        text = when (mode) {
+            ToolsMode.VERTICAL_SPACE -> "Drag\ndown to\nmake\nroom"
+            ToolsMode.OFFSET_CAMERA -> "Drag\nthe page"
+            ToolsMode.ZOOM -> "Drag up\nto zoom\nin, down\nto zoom\nout"
+            ToolsMode.LASER -> "Point;\nit fades\naway"
+        },
         color = BrnaColors.TextSecondaryOnPanel,
         fontSize = 10.sp,
         lineHeight = 12.sp,
         textAlign = TextAlign.Center,
         modifier = Modifier.padding(vertical = 4.dp)
+    )
+    if (mode == ToolsMode.VERTICAL_SPACE) {
+        // Rnote's two limits: which of the pages the pen goes down on move with it.
+        StripDivider()
+        StripIconToggle(
+            Icons.Default.ViewColumn, "Limit movement to Vertical Page Borders",
+            selected = toolConfig.spaceLimitVerticalBorders, implemented = true
+        ) { onSpaceLimitToggled(true) }
+        SpaceLimitCaption("Only its\npage\ncolumn")
+        StripIconToggle(
+            Icons.Default.ViewAgenda, "Limit movement to Horizontal Page Borders",
+            selected = toolConfig.spaceLimitHorizontalBorders, implemented = true
+        ) { onSpaceLimitToggled(false) }
+        SpaceLimitCaption("Down to\nthe page\nborder")
+    }
+}
+
+@Composable
+private fun SpaceLimitCaption(text: String) {
+    Text(
+        text = text,
+        color = BrnaColors.TextSecondaryOnPanel,
+        fontSize = 10.sp,
+        lineHeight = 12.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(bottom = 4.dp)
     )
 }
 

@@ -160,17 +160,38 @@ object TextFormatting {
      */
     fun togglesAt(el: NativeTextElement?, start: Int, end: Int): Set<TextToggle> {
         if (el == null) return emptySet()
+        val covered = coveredRuns(el, start, end)
+        return TextToggle.entries.filterTo(mutableSetOf()) { t -> covered.isNotEmpty() && covered.all { it.has(t) } }
+    }
+
+    /** The size every char in [start, end) of [el] shares, or null with none there or a mix of sizes. */
+    fun sizeAt(el: NativeTextElement?, start: Int, end: Int): Float? {
+        if (el == null) return null
+        val covered = coveredRuns(el, start, end)
+        val size = covered.firstOrNull()?.size ?: return null
+        return size.takeIf { s -> covered.all { it.size == s } }
+    }
+
+    /** The family every char in [start, end) of [el] shares, or null with none there or a mix of families. */
+    fun familyAt(el: NativeTextElement?, start: Int, end: Int): String? {
+        if (el == null) return null
+        val covered = coveredRuns(el, start, end)
+        val family = covered.firstOrNull()?.family ?: return null
+        return family.takeIf { f -> covered.all { it.family == f } }
+    }
+
+    /** The runs of [el] that [start, end) touches — the shared part of [togglesAt], [sizeAt] and [familyAt]. */
+    private fun coveredRuns(el: NativeTextElement, start: Int, end: Int): List<TextRun> {
         val base = TextRun(0, 0, el.fontFamily, el.fontSize, el.fontWeight, el.italic, false, false, el.color)
         val runs = runs(el)
         val from = minOf(start, end).coerceIn(0, el.text.length)
         val to = maxOf(start, end).coerceIn(0, el.text.length)
-        val covered = when {
+        return when {
             from < to -> runs.filter { it.end > from && it.start < to }
             // At the very end no ranged attribute reaches new text: the box's own style.
             from >= el.text.length -> listOf(base)
             else -> runs.filter { from >= it.start && from < it.end }
         }
-        return TextToggle.entries.filterTo(mutableSetOf()) { t -> covered.isNotEmpty() && covered.all { it.has(t) } }
     }
 
     /**

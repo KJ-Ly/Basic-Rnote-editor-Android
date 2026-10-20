@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.HighlightAlt
@@ -22,12 +23,12 @@ import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SaveAs
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -98,6 +99,10 @@ fun RnoteTopBar(
     onShare: (ShareTarget) -> Unit = {},
     /** The notes opened or saved last. */
     onShowRecent: () -> Unit = {},
+    /** Whether the note has a file of its own, whose earlier versions could have been kept. */
+    canRestoreVersion: Boolean = false,
+    /** The versions kept of the note's file before it was saved over, to bring one back. */
+    onRestoreVersion: () -> Unit = {},
     /** Thumbnails of every page, to jump to one. */
     onShowPages: () -> Unit = {},
     /** The note to Android's print dialog. */
@@ -114,12 +119,17 @@ fun RnoteTopBar(
     onToggleRespectBorders: () -> Unit = {},
     penSounds: Boolean = false,
     onTogglePenSounds: () -> Unit = {},
+    /** "Tablet Layout", offered on a screen narrower than 600 dp or lower than 480 dp, where the pen strip is otherwise left out. */
+    showTabletLayout: Boolean = false,
+    tabletLayout: Boolean = false,
+    onToggleTabletLayout: () -> Unit = {},
     blockPinchZoom: Boolean = false,
     onToggleBlockPinchZoom: () -> Unit = {},
-    /** Rnote's canvas menu zoom row: out, in, and to the page's width. */
+    /** Rnote's canvas menu zoom row: out, in, to the page's width and to its real size. */
     onZoomOut: () -> Unit = {},
     onZoomIn: () -> Unit = {},
     onZoomFitWidth: () -> Unit = {},
+    onZoomRealSize: () -> Unit = {},
     /** Rnote's page buttons, which only a Fixed Size document has a use for. */
     isFixedSize: Boolean = false,
     canRemovePage: Boolean = false,
@@ -131,7 +141,9 @@ fun RnoteTopBar(
     onToggleFocusMode: () -> Unit = {},
     /** Rnote's app menu Fullscreen (F11): Android's status and navigation bars put away. */
     fullscreen: Boolean = false,
-    onToggleFullscreen: () -> Unit = {}
+    onToggleFullscreen: () -> Unit = {},
+    /** Fonts loaded from files, standing in for families the tablet's own faces don't cover. */
+    onManageFonts: () -> Unit = {}
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showCanvasMenu by remember { mutableStateOf(false) }
@@ -233,7 +245,7 @@ fun RnoteTopBar(
             IconButton(onClick = { showShareMenu = true }) {
                 Icon(Icons.Default.Share, contentDescription = "Share", tint = iconTint)
 
-                DropdownMenu(
+                ScreenDropdownMenu(
                     expanded = showShareMenu,
                     onDismissRequest = { showShareMenu = false }
                 ) {
@@ -266,7 +278,7 @@ fun RnoteTopBar(
             IconButton(onClick = { showCanvasMenu = true }) {
                 Icon(GeneratedIcons.CanvasMenu, contentDescription = "Canvas Menu", tint = iconTint)
 
-                DropdownMenu(
+                ScreenDropdownMenu(
                     expanded = showCanvasMenu,
                     onDismissRequest = { showCanvasMenu = false }
                 ) {
@@ -280,6 +292,9 @@ fun RnoteTopBar(
                         IconButton(onClick = onZoomIn) { Icon(Icons.Default.ZoomIn, "Zoom in") }
                         IconButton(onClick = { showCanvasMenu = false; onZoomFitWidth() }) {
                             Icon(GeneratedIcons.ZoomFitWidth, "Zoom to Page Width")
+                        }
+                        IconButton(onClick = { showCanvasMenu = false; onZoomRealSize() }) {
+                            Icon(GeneratedIcons.ZoomRealSize, "Zoom to Real Size")
                         }
                     }
                     HorizontalDivider()
@@ -335,6 +350,13 @@ fun RnoteTopBar(
                         text = { Text("Block Pinch to Zoom") },
                         onClick = onToggleBlockPinchZoom
                     )
+                    if (showTabletLayout) {
+                        DropdownMenuItem(
+                            leadingIcon = { CheckMark(tabletLayout) },
+                            text = { Text("Tablet Layout") },
+                            onClick = onToggleTabletLayout
+                        )
+                    }
                 }
             }
 
@@ -342,7 +364,7 @@ fun RnoteTopBar(
             IconButton(onClick = { showOverflowMenu = true }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = iconTint)
 
-                DropdownMenu(
+                ScreenDropdownMenu(
                     expanded = showOverflowMenu,
                     onDismissRequest = { showOverflowMenu = false }
                 ) {
@@ -378,6 +400,12 @@ fun RnoteTopBar(
                         onClick = { showOverflowMenu = false; onSaveDocumentAs() }
                     )
                     DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.Restore, null) },
+                        text = { Text("Restore Previous Version…") },
+                        enabled = canRestoreVersion,
+                        onClick = { showOverflowMenu = false; onRestoreVersion() }
+                    )
+                    DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.PictureAsPdf, null) },
                         text = { Text("Import PDF…") },
                         onClick = { showOverflowMenu = false; onImportPdf() }
@@ -394,6 +422,14 @@ fun RnoteTopBar(
                             onClick = { showOverflowMenu = false; onTakePhoto() }
                         )
                     }
+                    // Fonts loaded from files, for text boxes in a family Android doesn't
+                    // have installed — the unrooted stand-in for desktop Rnote's system
+                    // font picker.
+                    DropdownMenuItem(
+                        leadingIcon = { Icon(Icons.Default.FontDownload, null) },
+                        text = { Text("Fonts…") },
+                        onClick = { showOverflowMenu = false; onManageFonts() }
+                    )
                     HorizontalDivider()
                     // In Rnote's app menu too; a switch that leaves the menu open to show it.
                     DropdownMenuItem(

@@ -6,7 +6,11 @@ import io.github.kjly.brna.model.NativeBrushStroke
 import io.github.kjly.brna.model.NativeCanvasElement
 import io.github.kjly.brna.model.NativePatternType
 import io.github.kjly.brna.model.NativeStrokePoint
+import io.github.kjly.brna.model.NativeShapeElement
 import io.github.kjly.brna.model.NativeTextElement
+import io.github.kjly.brna.model.LineShape
+import io.github.kjly.brna.model.RoughFillStyle
+import io.github.kjly.brna.model.RoughStyle
 import io.github.kjly.brna.model.PressureCurve
 import io.github.kjly.brna.model.RnoteNativeColor
 import io.github.kjly.brna.model.RnoteNativeDocument
@@ -135,7 +139,10 @@ class XoppConvertTest {
         XoppConvert.PageRect(0.0, 2245.0, 793.7, 3367.5)
     )
 
-    private fun export(vararg els: NativeCanvasElement, render: (NativeCanvasElement) -> ByteArray? = { null }) =
+    private fun export(
+        vararg els: NativeCanvasElement,
+        render: (NativeCanvasElement, XoppConvert.PageRect) -> ByteArray? = { _, _ -> null }
+    ) =
         XoppConvert.fromNative(RnoteNativeDocument(elements = els.toList()), a4, render)
 
     @Test
@@ -191,12 +198,35 @@ class XoppConvertTest {
             minX = 96f, minY = 48f, maxX = 192f, maxY = 96f
         )
         val shown = ArrayList<NativeCanvasElement>()
-        val root = export(ink, text, marker) { shown += it; byteArrayOf(9) }
+        val root = export(ink, text, marker) { el, _ -> shown += el; byteArrayOf(9) }
         val layers = root.pages.single().layers
         assertEquals(listOf(marker.points[0].x * 0.75, ink.points[0].x * 0.75), layers[1].strokes.map { it.coords[0].first })
         val picture = layers[0].images.single()
         assertEquals(listOf<NativeCanvasElement>(text), shown)
         assertEquals(XoppFile.Image(72.0, 36.0, 144.0, 72.0, "CQ=="), picture)
+    }
+
+    @Test
+    fun `a level line goes out as a picture as tall as its width, as Rnote's bounds are`() {
+        val line = NativeShapeElement(LineShape(96f, 96f, 192f, 96f), RnoteNativeColor.BLACK, 4f, 96f, 96f, 192f, 96f)
+        val extents = ArrayList<XoppConvert.PageRect>()
+        val root = export(line) { _, extent -> extents += extent; byteArrayOf(1) }
+        assertEquals(XoppConvert.PageRect(94.0, 94.0, 194.0, 98.0), extents.single())
+        assertEquals(XoppFile.Image(70.5, 70.5, 145.5, 73.5, "AQ=="), root.pages.single().layers[0].images.single())
+        // A rough one has room for its wobble as well.
+        val rough = line.copy(rough = RoughStyle(RoughFillStyle.HACHURE, RoughStyle.HACHURE_ANGLE_DEFAULT, 1L))
+        assertEquals(XoppConvert.PageRect(74.0, 74.0, 214.0, 118.0), XoppConvert.bounds(rough))
+    }
+
+    @Test
+    fun `a file without pages, or strokes of no width, give numbers and not NaN`() {
+        val empty = XoppConvert.toNative(XoppFile.Root(), noImages)
+        assertEquals(RnoteNativeDocument().pageWidth, empty.pageWidth, 0f)
+        assertEquals(RnoteNativeDocument().pageHeight, empty.pageHeight, 0f)
+        val flat = XoppFile.Stroke(color = black, width = listOf(1.0, 0.0, 0.0), coords = listOf(0.0 to 0.0, 1.0 to 1.0, 2.0 to 2.0))
+        val el = XoppConvert.brushStroke(flat, 0.0)!!
+        assertTrue(el.points.all { it.pressure == 0f })
+        assertEquals(0f, el.strokeWidth, 0f)
     }
 
     @Test

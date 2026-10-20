@@ -7,7 +7,9 @@ import io.github.kjly.brna.model.LayoutMode
 import io.github.kjly.brna.model.PageSize
 import io.github.kjly.brna.model.PaperPattern
 import io.github.kjly.brna.model.PaperStyle
+import io.github.kjly.brna.model.PenModes
 import io.github.kjly.brna.model.PenShortcuts
+import io.github.kjly.brna.model.TextDefaults
 
 /**
  * Persists user preferences (paper style, tool settings) across app sessions
@@ -37,7 +39,14 @@ object SettingsManager {
     private const val KEY_PEN_SOUNDS         = "penSounds"
     private const val KEY_BLOCK_PINCH_ZOOM   = "blockPinchZoom"
     private const val KEY_RESPECT_BORDERS    = "respectBorders"
+    private const val KEY_SPACE_LIMIT_VERTICAL   = "spaceLimitVerticalBorders"
+    private const val KEY_SPACE_LIMIT_HORIZONTAL = "spaceLimitHorizontalBorders"
     private const val KEY_PEN_SHORTCUTS      = "penShortcuts"
+    private const val KEY_PEN_MODES          = "penModes"
+    private const val KEY_PDF_IMPORT         = "pdfImportPrefs"
+    private const val KEY_TEXT_SIZE          = "textSize"
+    private const val KEY_TEXT_FAMILY        = "textFamily"
+    private const val KEY_TABLET_LAYOUT      = "tabletLayout"
 
     fun save(
         context: Context,
@@ -130,6 +139,58 @@ object SettingsManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getBoolean(KEY_RESPECT_BORDERS, false)
 
+    /** The Vertical Space tool's two limits (see [io.github.kjly.brna.model.ToolConfig]), kept as Rnote keeps its pens' settings. */
+    fun loadSpaceLimitVertical(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SPACE_LIMIT_VERTICAL, false)
+
+    fun loadSpaceLimitHorizontal(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SPACE_LIMIT_HORIZONTAL, false)
+
+    fun saveSpaceLimits(context: Context, vertical: Boolean, horizontal: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SPACE_LIMIT_VERTICAL, vertical)
+            .putBoolean(KEY_SPACE_LIMIT_HORIZONTAL, horizontal)
+            .apply()
+    }
+
+    /**
+     * The Typewriter's size for new text: the last one chosen, as Rnote keeps its typewriter
+     * settings; Rnote's default until then.
+     */
+    fun loadTextSize(context: Context): Float =
+        TextDefaults.size(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getFloat(KEY_TEXT_SIZE, TextDefaults.SIZE)
+        )
+
+    /** The raw family last chosen; see [TextDefaults.family] for turning it into one that can be used. */
+    fun loadTextFamily(context: Context): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_TEXT_FAMILY, null)
+
+    fun saveTextDefaults(context: Context, size: Float, family: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_TEXT_SIZE, size)
+            .putString(KEY_TEXT_FAMILY, family)
+            .apply()
+    }
+
+    /** Whether a screen narrower than 600 dp or lower than 480 dp gets the tablet layout (see [io.github.kjly.brna.model.TabletLayout]); off until switched on. */
+    fun loadTabletLayout(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_TABLET_LAYOUT, false)
+
+    fun saveTabletLayout(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_TABLET_LAYOUT, on)
+            .apply()
+    }
+
     fun saveRespectBorders(context: Context, on: Boolean) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
@@ -149,6 +210,19 @@ object SettingsManager {
             .apply()
     }
 
+    /** Rnote's PDF import preferences, the last ones chosen, as Rnote keeps them; its defaults until then. */
+    fun loadPdfImportPrefs(context: Context): PdfImportPrefs =
+        PdfImportPrefs.decode(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_PDF_IMPORT, null)
+        )
+
+    fun savePdfImportPrefs(context: Context, prefs: PdfImportPrefs) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PDF_IMPORT, prefs.encode())
+            .apply()
+    }
+
     /** Rnote's "Button Shortcuts", kept between sessions as Rnote keeps them; Rnote's defaults until changed. */
     fun loadPenShortcuts(context: Context): PenShortcuts =
         PenShortcuts.decode(
@@ -159,6 +233,19 @@ object SettingsManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_PEN_SHORTCUTS, shortcuts.encode())
+            .apply()
+    }
+
+    /** Rnote's "Stylus pen modes", kept between sessions as Rnote keeps them; Rnote's defaults until changed. */
+    fun loadPenModes(context: Context): PenModes =
+        PenModes.decode(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_PEN_MODES, null)
+        )
+
+    fun savePenModes(context: Context, modes: PenModes) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PEN_MODES, modes.encode())
             .apply()
     }
 
