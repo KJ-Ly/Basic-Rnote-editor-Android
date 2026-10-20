@@ -1,0 +1,83 @@
+# Builds the APK and runs the unit tests on every push to main and on every pull
+# request. Each run attaches the APK as a workflow artifact (Actions -> the run ->
+# "Artifacts"), so a pull request can be tried on a device without building it locally.
+# A push to main also publishes the APK as the pre-release "latest".
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:   # start by hand: Actions -> "Build APK" -> "Run workflow"
+
+permissions:
+  contents: write      # needed to create the "latest" release
+concurrency:
+  group: apk-build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v5
+
+      # Optional: a fixed signing key (base64 of a debug.keystore). Without the secret every
+      # run generates a new key, and an update only installs after uninstalling the app.
+      # Pull requests from forks never see secrets, so they always use a random key.
+      - name: Restore the fixed debug key (if the secret is set)
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            mkdir -p ~/.android
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+            echo "Using the fixed key."
+          else
+            echo "No secret set - using a random key."
+          fi
+
+      - name: Build the APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon test
+
+      - name: Rename the APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk dist/basic-rnote.apk
+
+      - name: Upload the APK as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: basic-rnote-apk
+          path: dist/basic-rnote.apk
+
+      - name: Update the "latest" release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          for i in 1 2 3 4 5; do
+            gh release create latest dist/basic-rnote.apk \
+              --title "Latest APK (${GITHUB_SHA::7})" \
+              --notes "Built automatically from commit ${GITHUB_SHA::7}." \
+              --prerelease \
+              --target "$GITHUB_SHA" && exit 0
+            echo "Attempt $i failed, waiting..."
+            sleep 10
+          done
+          exit 1
